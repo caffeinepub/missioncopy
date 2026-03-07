@@ -1,0 +1,136 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Cabinet Grotesk - Display font */
+@font-face {
+  font-family: "Cabinet Grotesk";
+  src: url("/assets/fonts/CabinetGrotesk-Variable.woff2") format("woff2");
+  font-weight: 100 900;
+  font-display: swap;
+}
+
+/* Satoshi - Body font */
+@font-face {
+  font-family: "Satoshi";
+  src: url("/assets/fonts/Satoshi-Variable.woff2") format("woff2");
+  font-weight: 300 900;
+  font-display: swap;
+}
+
+/* Geist Mono - Mono font */
+@font-face {
+  font-family: "Geist Mono";
+  src: url("/assets/fonts/GeistMono[wght].woff2") format("woff2");
+  font-weight: 100 900;
+  font-display: swap;
+}
+
+@layer base {
+  :root {
+    --radius: 0.25rem;
+
+    /* MISSIONCOPY: Black / Red / White Design System */
+    /* Pure black background */
+    --background: 0 0 0;
+    /* Pure white foreground */
+    --foreground: 1 0 0;
+    /* Card: near-black with slight warmth */
+    --card: 0.13 0 0;
+    --card-foreground: 1 0 0;
+    --popover: 0.15 0 0;
+    --popover-foreground: 1 0 0;
+    /* Primary: vibrant red */
+    --primary: 0.5 0.22 25.5;
+    --primary-foreground: 1 0 0;
+    /* Secondary: dark gray */
+    --secondary: 0.18 0 0;
+    --secondary-foreground: 0.9 0 0;
+    /* Muted: medium gray */
+    --muted: 0.2 0 0;
+    --muted-foreground: 0.55 0 0;
+    /* Accent: deep red */
+    --accent: 0.42 0.18 25.5;
+    --accent-foreground: 1 0 0;
+    /* Destructive: bright red */
+    --destructive: 0.55 0.24 25.5;
+    --destructive-foreground: 1 0 0;
+    --border: 0.25 0 0;
+    --input: 0.18 0 0;
+    --ring: 0.5 0.22 25.5;
+    --chart-1: 0.5 0.22 25.5;
+    --chart-2: 0.6 0.18 25.5;
+    --chart-3: 0.7 0.1 25.5;
+    --chart-4: 0.8 0.05 25.5;
+    --chart-5: 0.9 0 0;
+    --sidebar: 0.1 0 0;
+    --sidebar-foreground: 1 0 0;
+    --sidebar-primary: 0.5 0.22 25.5;
+    --sidebar-primary-foreground: 1 0 0;
+    --sidebar-accent: 0.18 0 0;
+    --sidebar-accent-foreground: 0.9 0 0;
+    --sidebar-border: 0.22 0 0;
+    --sidebar-ring: 0.5 0.22 25.5;
+
+    /* Brand tokens */
+    --brand-red: 0.5 0.22 25.5;
+    --brand-red-bright: 0.55 0.24 25.5;
+    --brand-red-dim: 0.35 0.15 25.5;
+    --brand-black: 0 0 0;
+    --brand-surface: 0.1 0 0;
+    --brand-surface-2: 0.15 0 0;
+    --brand-surface-3: 0.2 0 0;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  html {
+    color-scheme: dark;
+  }
+
+  body {
+    @apply bg-background text-foreground font-body antialiased;
+    background-color: oklch(0 0 0);
+  }
+
+  /* Red noise texture overlay for depth */
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='300' height='300'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='300' height='300' filter='url(%23noise)' opacity='0.04'/%3E%3C/svg%3E");
+    pointer-events: none;
+    z-index: 9999;
+    opacity: 0.35;
+  }
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: oklch(0.08 0 0);
+}
+::-webkit-scrollbar-thumb {
+  background: oklch(0.3 0 0);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: oklch(0.5 0.22 25.5);
+}
+
+/* Focus ring override */
+:focus-visible {
+  outline: 2px solid oklch(0.5 0.22 25.5);
+  outline-offset: 2px;
+}
+
+/* Selection */
+::selection {
+  background: oklch(0.5 0.22 25.5 / 0.35);
+  color: white;
+}
