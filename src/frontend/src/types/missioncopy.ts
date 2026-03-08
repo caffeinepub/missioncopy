@@ -16,17 +16,37 @@ export interface ContentItem {
   section: string;
   title: string;
   fileType: "video" | "pdf";
-  fileData: string; // base64 data URL: "data:video/mp4;base64,..." or "data:application/pdf;base64,..."
+  fileHash: string; // Caffeine blob storage hash e.g. "sha256:abc123..."
   uploadedAt: number;
-}
-
-export interface InviteToken {
-  code: string;
-  batch: string;
-  createdAt: number;
 }
 
 export const ADMIN_PASSWORD = "missioncopy@admin";
 export const ADMIN_SESSION_KEY = "missioncopy_admin_session";
 export const CONTENT_STORAGE_KEY = "missioncopy_content";
-export const INVITES_STORAGE_KEY = "missioncopy_invites";
+
+// Batch display info
+export const BATCH_INFO: Record<
+  string,
+  { label: string; subtitle: string; tag: string }
+> = {
+  "9th": {
+    label: "Class 9th",
+    subtitle: "Foundation Course",
+    tag: "CLASS IX",
+  },
+  "10th": {
+    label: "Class 10th",
+    subtitle: "Board Preparation",
+    tag: "CLASS X",
+  },
+  "Drona JEE 11th": {
+    label: "Drona JEE",
+    subtitle: "11th — Engineering",
+    tag: "JEE",
+  },
+  "Drona NEET 11th": {
+    label: "Drona NEET",
+    subtitle: "11th — Medical",
+    tag: "NEET",
+  },
+};

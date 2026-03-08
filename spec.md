@@ -1,39 +1,33 @@
 # MISSIONCOPY
 
 ## Current State
-- 4 batches: 9th, 10th, Drona JEE 11th, Drona NEET 11th
-- 3 sections per batch: Lecture, PDF, Doubt Solving
-- Admin can upload MP4/PDF via a dialog, stored as base64 in localStorage
-- Students access via invite link (URL param `?invite=CODE`) or by entering a code on the landing page
-- LandingPage has a "Student Access" card with invite code input field
-- StudentEnrollmentPage shows a welcome screen before entering the batch
-- StudentView shows content by section using tabs
-- Upload size is limited only by FileReader/localStorage practical limits (no explicit cap)
+- Admin can upload MP4/PDF files; content metadata is saved in localStorage, file blobs in browser IndexedDB.
+- StudentView reads content from the same localStorage/IndexedDB on the student's device.
+- Because storage is device-local, content uploaded by admin never appears on any student device.
+- 4 batches: Class 9th, Class 10th, Drona JEE 11th, Drona NEET 11th.
+- 3 sections per batch: Lecture, PDF, Doubt Solving.
+- Admin password: missioncopy@admin (hardcoded check).
+- Students select a batch from the landing page and view content with no login.
 
 ## Requested Changes (Diff)
 
 ### Add
-- After enrollment, students should land directly on the batch content view (StudentView) without needing to click "Enter Batch" — the enrollment step should auto-proceed or be removed entirely
-- Batch class-wise section navigation inside StudentView: after the student is assigned to a batch, they see that batch's sections (Lecture, PDF, Doubt Solving) immediately with full direct access to content
-- Upload size limit increased to 1GB (update any file size warning/hint text to reflect 1GB)
+- Motoko backend canister that stores content metadata and file blobs persistently, accessible from any device.
+- Backend functions: uploadContent (title, batch, section, fileType, blob chunks), getContentList (batch, section) returning metadata, getFileChunk (id, chunkIndex) for streaming file retrieval, deleteContent (id, adminPassword).
+- Chunked upload/download so large files (up to ~50 MB practical limit per IC message size) work.
+- Admin password verification done on backend for delete.
 
 ### Modify
-- **LandingPage**: Remove the entire "Student Access" card (invite code input + Access button). Landing page should only show the admin login button and branding. Students no longer enter via the landing page at all.
-- **StudentEnrollmentPage**: Remove the "YOU'VE BEEN INVITED" badge and the "No signup required — click below" text. The page should auto-redirect to the batch content view immediately on load (call `onEnter` in a useEffect on mount), eliminating the "Enter Batch" button click requirement. Or simply skip the enrollment page and go straight to StudentView.
-- **App.tsx**: When an invite code is detected in the URL, skip the enrollment step and go directly to `route: "student"` instead of `route: "enrollment"`.
-- **AdminDashboard**: Update upload dialog hint text to mention 1GB support instead of implying small file sizes.
-- **AdminDashboard**: Keep invite link generation for admin (admin still needs to generate links to share with students), but students no longer need to enter codes manually.
+- AdminDashboard: replace localStorage/IndexedDB writes with backend upload calls; show real upload progress via chunked upload; list content from backend.
+- StudentView: load content list from backend on mount; load file data from backend when item is opened.
+- storage.ts: keep as thin wrapper or remove entirely, backend is the source of truth.
 
 ### Remove
-- The "Student Access" invite code input card from the LandingPage
-- The `handleStudentAccess` function and related state (`inviteCode`) from LandingPage
-- The manual "Enter Batch" button requirement — enrollment should be automatic/instant
-- Any text on the enrollment page that says "No signup required — click below to access your course materials"
+- All localStorage and IndexedDB usage for content data (CONTENT_STORAGE_KEY, openDB, saveFileData, getFileData, deleteFileData, saveContent, addContentItem from local storage).
 
 ## Implementation Plan
-1. **App.tsx**: Change `parseInitialRoute` so that when `?invite=CODE` is found, set `route: "student"` directly (bypass enrollment). Also handle `?batch=...&token=...` path the same way.
-2. **LandingPage.tsx**: Remove the "Student Access" card div entirely. Remove `inviteCode` state, `handleStudentAccess` function, and `findInviteByCode` import. Remove `onStudentAccess` prop (or keep it but unused — prefer removing it clean). Update the App.tsx call site to not pass `onStudentAccess`.
-3. **StudentEnrollmentPage.tsx**: Either delete the file or convert it to auto-call `onEnter` via `useEffect` on mount (since App.tsx will skip it anyway). Clean approach: keep the file but auto-redirect, as a safe fallback.
-4. **AdminDashboard.tsx**: Update the upload dropzone hint text from "Supports MP4 and PDF" to "Supports MP4 and PDF up to 1GB". Also remove the 5MB warning if any. Update file input to not restrict size.
-5. **App.tsx `LandingPage` render**: Remove the `onStudentAccess` prop from LandingPage render since student access no longer goes through landing.
-6. Ensure `StudentView` shows sections immediately with correct batch-filtered content via tabs — this is already implemented, just confirm it works without enrollment barrier.
+1. Generate Motoko backend with: content metadata store (id, batch, section, title, fileType, uploadedAt), file chunk store (id -> [Blob]), uploadChunk/finalizeUpload/getContentList/getFileChunk/deleteContent functions, admin password check for delete.
+2. Update frontend storage utils to use backend actor calls.
+3. Update AdminDashboard to upload via chunked backend calls with progress.
+4. Update StudentView to fetch content list and file chunks from backend.
+5. Validate and deploy.

@@ -1,55 +1,56 @@
 import { Toaster } from "@/components/ui/sonner";
 import AdminDashboard from "@/pages/AdminDashboard";
 import LandingPage from "@/pages/LandingPage";
-import StudentEnrollmentPage from "@/pages/StudentEnrollmentPage";
 import StudentView from "@/pages/StudentView";
 import { ADMIN_SESSION_KEY } from "@/types/missioncopy";
-import { findInviteByCode } from "@/utils/storage";
+import { getLocalManifestHash, saveLocalManifestHash } from "@/utils/storage";
 import { useEffect, useState } from "react";
 
-export type AppRoute = "landing" | "admin" | "student" | "enrollment";
+export type AppRoute = "landing" | "admin" | "student";
 
 export interface AppState {
   route: AppRoute;
   studentBatch?: string;
-  studentToken?: string;
+}
+
+/**
+ * On load: if URL contains ?manifest=..., persist it to localStorage so all
+ * batch cards work even when navigating without the query param.
+ */
+function initManifestFromUrl(): string | null {
+  const params = new URLSearchParams(window.location.search);
+  const urlManifest = params.get("manifest");
+  if (urlManifest) {
+    saveLocalManifestHash(urlManifest);
+    return urlManifest;
+  }
+  return getLocalManifestHash();
 }
 
 function parseInitialRoute(): AppState {
-  const params = new URLSearchParams(window.location.search);
-  const inviteCode = params.get("invite");
-
-  // Check for invite in URL → go directly to student view (skip enrollment)
-  if (inviteCode) {
-    const token = findInviteByCode(inviteCode);
-    if (token) {
-      return {
-        route: "student",
-        studentBatch: token.batch,
-        studentToken: inviteCode,
-      };
-    }
-  }
-
-  // Check for /admin path or admin session
   const path = window.location.pathname;
-  if (path.includes("/admin") || path.includes("admin")) {
+
+  // Check for admin session
+  if (path.includes("/admin")) {
     if (sessionStorage.getItem(ADMIN_SESSION_KEY) === "authenticated") {
       return { route: "admin" };
     }
   }
 
-  // Check for /student path → go directly to student view (skip enrollment)
+  // Check for /student path with batch param
+  const params = new URLSearchParams(window.location.search);
   if (path.includes("/student")) {
-    const tokenParam = params.get("token");
     const batchParam = params.get("batch");
-    if (tokenParam && batchParam) {
-      return {
-        route: "student",
-        studentBatch: batchParam,
-        studentToken: tokenParam,
-      };
+    if (batchParam) {
+      return { route: "student", studentBatch: decodeURIComponent(batchParam) };
     }
+  }
+
+  // If a batch param is present on landing (e.g., from admin share link),
+  // go directly to student view
+  const batchFromUrl = params.get("batch");
+  if (batchFromUrl) {
+    return { route: "student", studentBatch: decodeURIComponent(batchFromUrl) };
   }
 
   return { route: "landing" };
@@ -57,24 +58,22 @@ function parseInitialRoute(): AppState {
 
 export default function App() {
   const [appState, setAppState] = useState<AppState>(parseInitialRoute);
+  const [manifestHash] = useState<string | null>(initManifestFromUrl);
 
   // Sync URL with app state
   useEffect(() => {
     if (appState.route === "admin") {
       window.history.pushState({}, "", "/admin");
-    } else if (
-      (appState.route === "student" || appState.route === "enrollment") &&
-      appState.studentBatch
-    ) {
+    } else if (appState.route === "student" && appState.studentBatch) {
       const params = new URLSearchParams({
         batch: appState.studentBatch,
-        token: appState.studentToken || "",
       });
-      window.history.pushState({}, "", `/student?${params.toString()}`);
+      if (manifestHash) params.set("manifest", manifestHash);
+      window.history.pushState({}, "", `/?${params.toString()}`);
     } else {
       window.history.pushState({}, "", "/");
     }
-  }, [appState]);
+  }, [appState, manifestHash]);
 
   const navigate = (newState: AppState) => {
     setAppState(newState);
@@ -94,7 +93,12 @@ export default function App() {
         }}
       />
       {appState.route === "landing" && (
-        <LandingPage onAdminLogin={() => navigate({ route: "admin" })} />
+        <LandingPage
+          onAdminLogin={() => navigate({ route: "admin" })}
+          onSelectBatch={(batch) =>
+            navigate({ route: "student", studentBatch: batch })
+          }
+        />
       )}
       {appState.route === "admin" && (
         <AdminDashboard
@@ -104,21 +108,10 @@ export default function App() {
           }}
         />
       )}
-      {appState.route === "enrollment" && (
-        <StudentEnrollmentPage
-          batch={appState.studentBatch || ""}
-          onEnter={() =>
-            navigate({
-              route: "student",
-              studentBatch: appState.studentBatch,
-              studentToken: appState.studentToken,
-            })
-          }
-        />
-      )}
       {appState.route === "student" && (
         <StudentView
           batch={appState.studentBatch || ""}
+          manifestHash={manifestHash || ""}
           onBack={() => navigate({ route: "landing" })}
         />
       )}

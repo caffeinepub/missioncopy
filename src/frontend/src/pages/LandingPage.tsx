@@ -7,16 +7,34 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { ADMIN_PASSWORD, ADMIN_SESSION_KEY } from "@/types/missioncopy";
-import { BookOpen, Lock, Shield, Users, Zap } from "lucide-react";
+import {
+  ADMIN_PASSWORD,
+  ADMIN_SESSION_KEY,
+  BATCHES,
+  BATCH_INFO,
+} from "@/types/missioncopy";
+import {
+  BookOpen,
+  ChevronRight,
+  FileText,
+  Lock,
+  Shield,
+  Video,
+} from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useState } from "react";
 
 interface LandingPageProps {
   onAdminLogin: () => void;
+  onSelectBatch: (batch: string) => void;
 }
 
-export default function LandingPage({ onAdminLogin }: LandingPageProps) {
+const BATCH_ICONS = [Video, BookOpen, FileText, BookOpen];
+
+export default function LandingPage({
+  onAdminLogin,
+  onSelectBatch,
+}: LandingPageProps) {
   const [showAdminModal, setShowAdminModal] = useState(false);
   const [adminPassword, setAdminPassword] = useState("");
   const [passwordError, setPasswordError] = useState("");
@@ -27,7 +45,7 @@ export default function LandingPage({ onAdminLogin }: LandingPageProps) {
     setIsLoggingIn(true);
     setPasswordError("");
 
-    await new Promise((r) => setTimeout(r, 400)); // brief delay for UX
+    await new Promise((r) => setTimeout(r, 400));
 
     if (adminPassword === ADMIN_PASSWORD) {
       sessionStorage.setItem(ADMIN_SESSION_KEY, "authenticated");
@@ -43,7 +61,6 @@ export default function LandingPage({ onAdminLogin }: LandingPageProps) {
     <div className="min-h-screen bg-background flex flex-col relative overflow-hidden">
       {/* Background geometric pattern */}
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
-        {/* Red diagonal stripe */}
         <div
           className="absolute top-0 right-0 w-[600px] h-[600px] opacity-5"
           style={{
@@ -51,7 +68,6 @@ export default function LandingPage({ onAdminLogin }: LandingPageProps) {
               "conic-gradient(from 45deg, oklch(0.5 0.22 25.5), transparent 30%, transparent 50%, oklch(0.5 0.22 25.5) 70%)",
           }}
         />
-        {/* Grid lines */}
         <svg
           className="absolute inset-0 w-full h-full opacity-[0.04]"
           xmlns="http://www.w3.org/2000/svg"
@@ -75,7 +91,6 @@ export default function LandingPage({ onAdminLogin }: LandingPageProps) {
           </defs>
           <rect width="100%" height="100%" fill="url(#grid)" />
         </svg>
-        {/* Glowing orb */}
         <div
           className="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[400px] rounded-full opacity-5"
           style={{
@@ -121,97 +136,85 @@ export default function LandingPage({ onAdminLogin }: LandingPageProps) {
       </header>
 
       {/* Hero */}
-      <main className="relative z-10 flex-1 flex flex-col items-center justify-center px-6 py-16">
+      <main className="relative z-10 flex-1 flex flex-col items-center px-6 py-12">
         <motion.div
           initial={{ opacity: 0, y: 30 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.6, delay: 0.1 }}
-          className="text-center max-w-3xl"
+          className="text-center mb-12"
         >
-          {/* Logo / Wordmark */}
-          <div className="mb-8 inline-flex flex-col items-center">
-            <div className="flex items-center gap-2 mb-3">
-              <div className="h-px w-16 bg-gradient-to-r from-transparent to-brand-red" />
-              <span className="text-brand-red font-mono text-xs tracking-[0.3em] uppercase">
-                Est. 2024
-              </span>
-              <div className="h-px w-16 bg-gradient-to-l from-transparent to-brand-red" />
-            </div>
-            <h1 className="font-display font-black text-7xl sm:text-8xl md:text-9xl tracking-tighter leading-none">
-              <span className="text-foreground">MISSION</span>
-              <span className="text-brand-red">COPY</span>
-            </h1>
-            <div className="mt-4 flex items-center gap-2">
-              <div className="h-px w-16 bg-gradient-to-r from-transparent to-brand-red" />
-              <p className="text-muted-foreground text-sm tracking-widest uppercase font-body font-medium">
-                India's Premier Coaching Platform
-              </p>
-              <div className="h-px w-16 bg-gradient-to-l from-transparent to-brand-red" />
-            </div>
+          <div className="flex items-center gap-2 justify-center mb-3">
+            <div className="h-px w-16 bg-gradient-to-r from-transparent to-brand-red" />
+            <span className="text-brand-red font-mono text-xs tracking-[0.3em] uppercase">
+              Est. 2024
+            </span>
+            <div className="h-px w-16 bg-gradient-to-l from-transparent to-brand-red" />
           </div>
+          <h1 className="font-display font-black text-6xl sm:text-7xl md:text-8xl tracking-tighter leading-none mb-4">
+            <span className="text-foreground">MISSION</span>
+            <span className="text-brand-red">COPY</span>
+          </h1>
+          <p className="text-muted-foreground text-sm tracking-widest uppercase font-body font-medium">
+            India's Premier Coaching Platform
+          </p>
+        </motion.div>
 
-          {/* Feature badges */}
-          <motion.div
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5, delay: 0.3 }}
-            className="flex flex-wrap justify-center gap-3 mb-12"
-          >
-            {[
-              { icon: BookOpen, label: "Video Lectures" },
-              { icon: Zap, label: "PDF Resources" },
-              { icon: Users, label: "Doubt Solving" },
-            ].map(({ icon: Icon, label }) => (
-              <span
-                key={label}
-                className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-brand-surface border border-border/50 text-muted-foreground text-xs font-body"
-              >
-                <Icon className="w-3 h-3 text-brand-red" />
-                {label}
-              </span>
-            ))}
-          </motion.div>
+        {/* Batch Cards */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.5, delay: 0.3 }}
+          className="w-full max-w-2xl"
+        >
+          <p className="text-muted-foreground text-xs font-body uppercase tracking-widest text-center mb-5">
+            Select your batch to access content
+          </p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {BATCHES.map((batch, idx) => {
+              const info = BATCH_INFO[batch];
+              const Icon = BATCH_ICONS[idx];
+              return (
+                <motion.button
+                  key={batch}
+                  type="button"
+                  onClick={() => onSelectBatch(batch)}
+                  initial={{ opacity: 0, y: 16 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.4, delay: 0.35 + idx * 0.07 }}
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
+                  className="group relative flex items-center gap-4 bg-brand-surface border border-border/50 hover:border-brand-red/60 hover:bg-brand-surface-2 rounded-xl p-5 text-left transition-all"
+                  data-ocid={`landing.batch.button.${idx + 1}`}
+                >
+                  {/* Icon */}
+                  <div className="w-11 h-11 rounded-lg bg-brand-red/10 border border-brand-red/20 flex items-center justify-center shrink-0 group-hover:bg-brand-red/20 transition-colors">
+                    <Icon className="w-5 h-5 text-brand-red" />
+                  </div>
 
-          {/* Admin access note */}
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5, delay: 0.4 }}
-            className="flex justify-center"
-          >
-            <p className="text-muted-foreground/50 text-xs font-body">
-              Students access content via invite link provided by their batch
-              coordinator
-            </p>
-          </motion.div>
+                  {/* Text */}
+                  <div className="flex-1 min-w-0">
+                    <span className="block text-[10px] font-mono text-brand-red/70 tracking-widest uppercase mb-0.5">
+                      {info.tag}
+                    </span>
+                    <span className="block text-foreground font-display font-bold text-lg leading-tight">
+                      {info.label}
+                    </span>
+                    <span className="block text-muted-foreground text-xs font-body mt-0.5">
+                      {info.subtitle}
+                    </span>
+                  </div>
+
+                  {/* Arrow */}
+                  <ChevronRight className="w-4 h-4 text-muted-foreground/30 group-hover:text-brand-red/60 group-hover:translate-x-0.5 transition-all shrink-0" />
+
+                  {/* Hover glow */}
+                  <div className="absolute inset-0 rounded-xl bg-brand-red/0 group-hover:bg-brand-red/[0.03] transition-colors pointer-events-none" />
+                </motion.button>
+              );
+            })}
+          </div>
         </motion.div>
       </main>
-
-      {/* Stats bar */}
-      <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        transition={{ duration: 0.6, delay: 0.6 }}
-        className="relative z-10 border-t border-border/30 py-6 px-6"
-      >
-        <div className="max-w-4xl mx-auto grid grid-cols-2 sm:grid-cols-4 gap-6">
-          {[
-            { value: "4", label: "Batches" },
-            { value: "3", label: "Section Types" },
-            { value: "JEE & NEET", label: "Specializations" },
-            { value: "100%", label: "Digital Access" },
-          ].map(({ value, label }) => (
-            <div key={label} className="text-center">
-              <div className="font-display font-black text-2xl text-brand-red">
-                {value}
-              </div>
-              <div className="font-body text-xs text-muted-foreground mt-0.5">
-                {label}
-              </div>
-            </div>
-          ))}
-        </div>
-      </motion.div>
 
       {/* Footer */}
       <footer className="relative z-10 border-t border-border/20 py-4 px-6">

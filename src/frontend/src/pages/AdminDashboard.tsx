@@ -14,25 +14,22 @@ import { Progress } from "@/components/ui/progress";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { useStorageClient } from "@/hooks/useStorageClient";
+import { BATCHES, type ContentItem, SECTIONS } from "@/types/missioncopy";
 import {
-  BATCHES,
-  type ContentItem,
-  type InviteToken,
-  SECTIONS,
-} from "@/types/missioncopy";
-import {
-  addContentItem,
-  addInviteToken,
-  deleteContentItem,
-  getContent,
-  getInvites,
+  getLocalManifestHash,
+  getLocalManifestItems,
+  saveLocalManifestHash,
+  saveLocalManifestItems,
+  uploadFile as uploadFileToStorage,
+  uploadManifest,
 } from "@/utils/storage";
 import {
   Calendar,
+  Check,
   ChevronRight,
   Copy,
   ExternalLink,
-  Eye,
   FileText,
   Link2,
   Loader2,
@@ -56,10 +53,15 @@ function generateId(): string {
 }
 
 export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
+  const storageClient = useStorageClient();
   const [selectedBatch, setSelectedBatch] = useState<string>(BATCHES[0]);
   const [selectedSection, setSelectedSection] = useState<string>(SECTIONS[0]);
-  const [contentItems, setContentItems] = useState<ContentItem[]>(getContent);
-  const [invites, setInvites] = useState<InviteToken[]>(getInvites);
+  const [contentItems, setContentItems] = useState<ContentItem[]>(() =>
+    getLocalManifestItems(),
+  );
+  const [manifestHash, setManifestHash] = useState<string | null>(() =>
+    getLocalManifestHash(),
+  );
 
   // Upload state
   const [uploadOpen, setUploadOpen] = useState(false);
@@ -67,25 +69,52 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
   const [uploadFile, setUploadFile] = useState<File | null>(null);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [isUploading, setIsUploading] = useState(false);
+  const [uploadStatus, setUploadStatus] = useState<
+    "idle" | "uploading-file" | "uploading-manifest" | "done"
+  >("idle");
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Invite state
-  const [inviteOpen, setInviteOpen] = useState(false);
-  const [generatedInviteUrl, setGeneratedInviteUrl] = useState("");
-  const [isGeneratingInvite, setIsGeneratingInvite] = useState(false);
-  const [viewInvitesOpen, setViewInvitesOpen] = useState(false);
-
   // Content viewer
-  const [viewerItem, setViewerItem] = useState<ContentItem | null>(null);
+  const [viewerItem, setViewerItem] = useState<{
+    item: ContentItem;
+    url: string;
+  } | null>(null);
+  const [viewerLoading, setViewerLoading] = useState(false);
 
   // Delete confirm
   const [deleteId, setDeleteId] = useState<string | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  // Copy link state
+  const [copiedBatch, setCopiedBatch] = useState<string | null>(null);
 
   const filteredContent = contentItems.filter(
     (item) => item.batch === selectedBatch && item.section === selectedSection,
   );
 
-  const batchInvites = invites.filter((inv) => inv.batch === selectedBatch);
+  const getStudentLink = (batch?: string) => {
+    if (!manifestHash) return "";
+    const base = window.location.origin;
+    const params = new URLSearchParams({ manifest: manifestHash });
+    if (batch) params.set("batch", batch);
+    return `${base}/?${params.toString()}`;
+  };
+
+  const handleCopyBatchLink = async (batch: string) => {
+    const link = getStudentLink(batch);
+    if (!link) {
+      toast.error("No manifest yet. Upload content first.");
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(link);
+      setCopiedBatch(batch);
+      toast.success(`Link for ${batch} copied!`);
+      setTimeout(() => setCopiedBatch(null), 2500);
+    } catch {
+      toast.error("Could not copy to clipboard.");
+    }
+  };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -113,7 +142,7 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
     [uploadTitle],
   );
 
-  const handleUpload = () => {
+  const handleUpload = async () => {
     if (!uploadTitle.trim()) {
       toast.error("Please enter a title");
       return;
@@ -125,23 +154,24 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
 
     setIsUploading(true);
     setUploadProgress(0);
+    setUploadStatus("uploading-file");
 
     const isVideo =
       uploadFile.name.toLowerCase().endsWith(".mp4") ||
       uploadFile.type.startsWith("video/");
 
-    const reader = new FileReader();
+    try {
+      // 1. Upload the file bytes to blob storage
+      const fileHash = await uploadFileToStorage(
+        storageClient,
+        uploadFile,
+        (pct) => {
+          setUploadProgress(Math.round(pct * 0.8)); // 0-80% for file upload
+        },
+      );
 
-    reader.onprogress = (event) => {
-      if (event.lengthComputable) {
-        const pct = Math.round((event.loaded / event.total) * 90);
-        setUploadProgress(pct);
-      }
-    };
-
-    reader.onload = () => {
-      const fileData = reader.result as string;
-      setUploadProgress(100);
+      setUploadStatus("uploading-manifest");
+      setUploadProgress(85);
 
       const newItem: ContentItem = {
         id: generateId(),
@@ -149,63 +179,73 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
         section: selectedSection,
         title: uploadTitle.trim(),
         fileType: isVideo ? "video" : "pdf",
-        fileData,
+        fileHash,
         uploadedAt: Date.now(),
       };
 
-      addContentItem(newItem);
-      setContentItems(getContent());
-      setIsUploading(false);
-      setUploadOpen(false);
-      setUploadTitle("");
-      setUploadFile(null);
-      setUploadProgress(0);
-      toast.success("Content uploaded successfully");
-    };
+      const updatedItems = [...contentItems, newItem];
 
-    reader.onerror = () => {
-      console.error("FileReader error:", reader.error);
-      toast.error("Upload failed. Please try again.");
-      setIsUploading(false);
-    };
+      // 2. Upload the manifest
+      const newManifestHash = await uploadManifest(storageClient, updatedItems);
 
-    reader.readAsDataURL(uploadFile);
-  };
+      setUploadProgress(100);
 
-  const handleGenerateInvite = async () => {
-    setIsGeneratingInvite(true);
-    try {
-      // Generate a random invite code (backend-independent fallback)
-      const code = `MC-${selectedBatch.replace(/\s+/g, "").toUpperCase().slice(0, 6)}-${Math.random().toString(36).toUpperCase().slice(2, 8)}`;
-      const token: InviteToken = {
-        code,
-        batch: selectedBatch,
-        createdAt: Date.now(),
-      };
-      addInviteToken(token);
-      setInvites(getInvites());
-      const url = `${window.location.origin}/?invite=${encodeURIComponent(code)}`;
-      setGeneratedInviteUrl(url);
-      setInviteOpen(true);
+      // 3. Save locally
+      saveLocalManifestItems(updatedItems);
+      saveLocalManifestHash(newManifestHash);
+      setContentItems(updatedItems);
+      setManifestHash(newManifestHash);
+      setUploadStatus("done");
+
+      setTimeout(() => {
+        setIsUploading(false);
+        setUploadOpen(false);
+        setUploadTitle("");
+        setUploadFile(null);
+        setUploadProgress(0);
+        setUploadStatus("idle");
+      }, 600);
+
+      toast.success("Content uploaded — students can see it now!");
     } catch (err) {
-      console.error(err);
-      toast.error("Failed to generate invite link");
-    } finally {
-      setIsGeneratingInvite(false);
+      console.error("Upload error:", err);
+      toast.error("Upload failed. Please check your connection and try again.");
+      setIsUploading(false);
+      setUploadProgress(0);
+      setUploadStatus("idle");
     }
   };
 
-  const handleDelete = (id: string) => {
-    deleteContentItem(id);
-    setContentItems(getContent());
-    setDeleteId(null);
-    toast.success("Content deleted");
+  const handleOpenViewer = async (item: ContentItem) => {
+    setViewerLoading(true);
+    try {
+      const url = await storageClient.getDirectURL(item.fileHash);
+      setViewerItem({ item, url });
+    } catch (err) {
+      console.error(err);
+      toast.error("Could not load file. Please try again.");
+    } finally {
+      setViewerLoading(false);
+    }
   };
 
-  const copyToClipboard = (text: string) => {
-    navigator.clipboard.writeText(text).then(() => {
-      toast.success("Copied to clipboard");
-    });
+  const handleDelete = async (id: string) => {
+    setIsDeleting(true);
+    try {
+      const updatedItems = contentItems.filter((i) => i.id !== id);
+      const newManifestHash = await uploadManifest(storageClient, updatedItems);
+      saveLocalManifestItems(updatedItems);
+      saveLocalManifestHash(newManifestHash);
+      setContentItems(updatedItems);
+      setManifestHash(newManifestHash);
+      setDeleteId(null);
+      toast.success("Content deleted");
+    } catch (err) {
+      console.error(err);
+      toast.error("Failed to delete content.");
+    } finally {
+      setIsDeleting(false);
+    }
   };
 
   const formatDate = (ts: number) => {
@@ -214,6 +254,16 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
       month: "short",
       year: "numeric",
     });
+  };
+
+  const uploadStatusText = () => {
+    if (uploadStatus === "uploading-file") {
+      return uploadProgress < 80 ? "Uploading file to CDN..." : "Processing...";
+    }
+    if (uploadStatus === "uploading-manifest")
+      return "Updating content list...";
+    if (uploadStatus === "done") return "Done!";
+    return "";
   };
 
   return (
@@ -290,18 +340,37 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
             ))}
           </div>
 
-          {/* Batch stats */}
-          <div className="p-4 border-t border-border/30 mt-auto">
-            <p className="text-[10px] text-muted-foreground/60 font-body mb-1">
-              Selected batch
+          {/* Student Access Share */}
+          <div className="p-3 border-t border-border/30 mt-auto space-y-2">
+            <p className="text-[10px] text-muted-foreground/60 font-body uppercase tracking-widest flex items-center gap-1">
+              <Link2 className="w-3 h-3" />
+              Student Links
             </p>
-            <p className="text-foreground text-xs font-body font-semibold truncate">
-              {selectedBatch}
-            </p>
-            <p className="text-muted-foreground text-[10px] mt-0.5 font-body">
-              {contentItems.filter((i) => i.batch === selectedBatch).length}{" "}
-              items total
-            </p>
+            {manifestHash ? (
+              <div className="space-y-1">
+                {BATCHES.map((batch) => (
+                  <button
+                    key={batch}
+                    type="button"
+                    onClick={() => handleCopyBatchLink(batch)}
+                    className="w-full text-left px-2 py-1.5 rounded text-[11px] font-body text-muted-foreground hover:text-foreground hover:bg-brand-surface-2 flex items-center gap-1.5 transition-all"
+                    data-ocid="admin.student.link.button"
+                    title={`Copy student link for ${batch}`}
+                  >
+                    {copiedBatch === batch ? (
+                      <Check className="w-3 h-3 text-green-500 shrink-0" />
+                    ) : (
+                      <Copy className="w-3 h-3 shrink-0 opacity-50" />
+                    )}
+                    <span className="truncate">{batch}</span>
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <p className="text-[10px] text-muted-foreground/40 font-body">
+                Upload content to generate links
+              </p>
+            )}
           </div>
         </aside>
 
@@ -342,40 +411,23 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
               </p>
             </div>
             <div className="flex items-center gap-2 shrink-0">
+              {/* Mobile: copy link button */}
               <Button
                 size="sm"
                 variant="outline"
-                onClick={() => setViewInvitesOpen(true)}
-                className="border-border/50 text-muted-foreground hover:text-foreground hover:border-brand-red/30 gap-1.5 font-body text-xs"
+                onClick={() => handleCopyBatchLink(selectedBatch)}
+                disabled={!manifestHash}
+                className="border-border/40 text-muted-foreground hover:text-foreground hover:border-brand-red/40 gap-1.5 font-body text-xs md:hidden"
+                data-ocid="admin.student.link.button"
               >
-                <Eye className="w-3.5 h-3.5" />
-                <span className="hidden sm:inline">View Invites</span>
-                <span className="sm:hidden">Invites</span>
-                {batchInvites.length > 0 && (
-                  <Badge
-                    variant="outline"
-                    className="ml-0.5 border-brand-red/30 text-brand-red text-[10px] h-4 px-1"
-                  >
-                    {batchInvites.length}
-                  </Badge>
-                )}
-              </Button>
-              <Button
-                size="sm"
-                onClick={handleGenerateInvite}
-                disabled={isGeneratingInvite}
-                variant="outline"
-                className="border-brand-red/40 text-brand-red hover:bg-brand-red/5 gap-1.5 font-body text-xs"
-                data-ocid="admin.invite.button"
-              >
-                {isGeneratingInvite ? (
-                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                {copiedBatch === selectedBatch ? (
+                  <Check className="w-3.5 h-3.5 text-green-500" />
                 ) : (
-                  <Link2 className="w-3.5 h-3.5" />
+                  <Copy className="w-3.5 h-3.5" />
                 )}
-                <span className="hidden sm:inline">Generate Invite</span>
-                <span className="sm:hidden">Invite</span>
+                Share
               </Button>
+
               <Button
                 size="sm"
                 onClick={() => setUploadOpen(true)}
@@ -383,10 +435,35 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
                 data-ocid="admin.upload.open_modal_button"
               >
                 <Plus className="w-3.5 h-3.5" />
-                Upload
+                Upload Content
               </Button>
             </div>
           </div>
+
+          {/* Student Access Banner (visible when manifest exists) */}
+          {manifestHash && (
+            <div className="px-4 md:px-6 py-2 bg-green-500/5 border-b border-green-500/10 hidden md:flex items-center gap-3">
+              <div className="w-1.5 h-1.5 rounded-full bg-green-500 shrink-0" />
+              <p className="text-green-400/80 text-xs font-body flex-1">
+                Content is live — students on any device can access it via the
+                batch links
+              </p>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => handleCopyBatchLink(selectedBatch)}
+                className="text-green-400/70 hover:text-green-400 hover:bg-green-500/10 gap-1.5 font-body text-xs h-7 px-2"
+                data-ocid="admin.student.copy_link.button"
+              >
+                {copiedBatch === selectedBatch ? (
+                  <Check className="w-3 h-3" />
+                ) : (
+                  <Copy className="w-3 h-3" />
+                )}
+                Copy {selectedBatch} link
+              </Button>
+            </div>
+          )}
 
           {/* Section Tabs + Content */}
           <Tabs
@@ -432,7 +509,7 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
                         No {section} content yet
                       </p>
                       <p className="text-muted-foreground/50 text-xs mt-1 font-body">
-                        Click "Upload" to add content to this section
+                        Click "Upload Content" to add content to this section
                       </p>
                       <Button
                         size="sm"
@@ -456,7 +533,6 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
                             className="flex items-center gap-3 bg-brand-surface border border-border/40 rounded-lg p-3.5 group hover:border-border/60 transition-colors"
                             data-ocid={`admin.content.item.${idx + 1}`}
                           >
-                            {/* File type icon */}
                             <div
                               className={`w-9 h-9 rounded flex items-center justify-center shrink-0 ${
                                 item.fileType === "video"
@@ -471,7 +547,6 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
                               )}
                             </div>
 
-                            {/* Content info */}
                             <div className="flex-1 min-w-0">
                               <p className="text-foreground font-body text-sm font-semibold truncate">
                                 {item.title}
@@ -494,17 +569,19 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
                               </div>
                             </div>
 
-                            {/* Actions */}
                             <div className="flex items-center gap-1.5 shrink-0">
                               <Button
                                 size="icon"
                                 variant="ghost"
-                                onClick={() => setViewerItem(item)}
+                                onClick={() => handleOpenViewer(item)}
+                                disabled={viewerLoading}
                                 className="w-7 h-7 text-muted-foreground hover:text-foreground hover:bg-brand-surface-2"
                                 title="View content"
                                 data-ocid="admin.content.view_button"
                               >
-                                {item.fileType === "video" ? (
+                                {viewerLoading ? (
+                                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                ) : item.fileType === "video" ? (
                                   <Play className="w-3.5 h-3.5" />
                                 ) : (
                                   <ExternalLink className="w-3.5 h-3.5" />
@@ -557,7 +634,6 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
           </DialogHeader>
 
           <div className="space-y-4 py-2">
-            {/* Title */}
             <div className="space-y-1.5">
               <Label className="text-muted-foreground text-xs font-body">
                 Title
@@ -571,7 +647,6 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
               />
             </div>
 
-            {/* File Drop Zone */}
             <div className="space-y-1.5">
               <Label className="text-muted-foreground text-xs font-body">
                 File
@@ -589,7 +664,7 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
                 <input
                   ref={fileInputRef}
                   type="file"
-                  accept=".mp4,.pdf"
+                  accept=".mp4,.pdf,video/mp4,application/pdf"
                   className="hidden"
                   onChange={handleFileChange}
                 />
@@ -635,7 +710,6 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
               </div>
             </div>
 
-            {/* Upload Progress */}
             <AnimatePresence>
               {isUploading && (
                 <motion.div
@@ -647,7 +721,7 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
                 >
                   <div className="flex justify-between items-center">
                     <span className="text-muted-foreground text-xs font-body">
-                      Uploading...
+                      {uploadStatusText()}
                     </span>
                     <span className="text-brand-red text-xs font-mono">
                       {uploadProgress}%
@@ -694,128 +768,6 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
         </DialogContent>
       </Dialog>
 
-      {/* Invite Generated Dialog */}
-      <Dialog open={inviteOpen} onOpenChange={setInviteOpen}>
-        <DialogContent
-          className="bg-brand-surface border border-border max-w-md"
-          data-ocid="admin.invite.dialog"
-        >
-          <DialogHeader>
-            <DialogTitle className="font-display font-bold text-foreground flex items-center gap-2">
-              <Link2 className="w-4 h-4 text-brand-red" />
-              Invite Link Generated
-            </DialogTitle>
-          </DialogHeader>
-          <div className="py-2 space-y-3">
-            <p className="text-muted-foreground text-sm font-body">
-              Share this link with students for{" "}
-              <span className="text-foreground font-semibold">
-                {selectedBatch}
-              </span>
-              :
-            </p>
-            <div className="flex gap-2">
-              <div className="flex-1 bg-background border border-border/50 rounded px-3 py-2 font-mono text-xs text-muted-foreground truncate">
-                {generatedInviteUrl}
-              </div>
-              <Button
-                size="icon"
-                variant="outline"
-                onClick={() => copyToClipboard(generatedInviteUrl)}
-                className="shrink-0 border-border/50 hover:border-brand-red/40 hover:text-brand-red"
-              >
-                <Copy className="w-4 h-4" />
-              </Button>
-            </div>
-            <p className="text-muted-foreground/50 text-xs font-body">
-              Students can use this link directly — no signup required.
-            </p>
-          </div>
-          <DialogFooter>
-            <Button
-              onClick={() => setInviteOpen(false)}
-              className="bg-brand-red hover:bg-brand-red-bright text-white font-body font-semibold"
-              data-ocid="admin.invite.close_button"
-            >
-              Done
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* View Invites Dialog */}
-      <Dialog open={viewInvitesOpen} onOpenChange={setViewInvitesOpen}>
-        <DialogContent className="bg-brand-surface border border-border max-w-md">
-          <DialogHeader>
-            <DialogTitle className="font-display font-bold text-foreground flex items-center gap-2">
-              <Eye className="w-4 h-4 text-brand-red" />
-              Invite Links — {selectedBatch}
-            </DialogTitle>
-          </DialogHeader>
-          <div className="py-2">
-            {batchInvites.length === 0 ? (
-              <div className="text-center py-8">
-                <p className="text-muted-foreground font-body text-sm">
-                  No invite links generated yet
-                </p>
-                <Button
-                  size="sm"
-                  onClick={() => {
-                    setViewInvitesOpen(false);
-                    handleGenerateInvite();
-                  }}
-                  className="mt-3 bg-brand-red hover:bg-brand-red-bright text-white font-body text-xs"
-                >
-                  Generate First Invite
-                </Button>
-              </div>
-            ) : (
-              <ScrollArea className="max-h-72">
-                <div className="space-y-2">
-                  {batchInvites.map((inv, idx) => {
-                    const url = `${window.location.origin}/?invite=${encodeURIComponent(inv.code)}`;
-                    return (
-                      <div
-                        key={inv.code}
-                        className="flex items-center gap-2 bg-background border border-border/40 rounded p-2.5"
-                        data-ocid={`admin.invite.item.${idx + 1}`}
-                      >
-                        <div className="flex-1 min-w-0">
-                          <p className="font-mono text-xs text-foreground truncate">
-                            {inv.code}
-                          </p>
-                          <p className="text-muted-foreground/50 text-[10px] font-body mt-0.5">
-                            Created {formatDate(inv.createdAt)}
-                          </p>
-                        </div>
-                        <Button
-                          size="icon"
-                          variant="ghost"
-                          onClick={() => copyToClipboard(url)}
-                          className="w-7 h-7 text-muted-foreground hover:text-brand-red shrink-0"
-                        >
-                          <Copy className="w-3.5 h-3.5" />
-                        </Button>
-                      </div>
-                    );
-                  })}
-                </div>
-              </ScrollArea>
-            )}
-          </div>
-          <DialogFooter>
-            <Button
-              variant="ghost"
-              onClick={() => setViewInvitesOpen(false)}
-              className="text-muted-foreground font-body text-sm"
-              data-ocid="admin.invite.view_close_button"
-            >
-              Close
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
       {/* Delete Confirm Dialog */}
       <Dialog open={!!deleteId} onOpenChange={(v) => !v && setDeleteId(null)}>
         <DialogContent className="bg-brand-surface border border-border max-w-sm">
@@ -833,6 +785,7 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
             <Button
               variant="ghost"
               onClick={() => setDeleteId(null)}
+              disabled={isDeleting}
               className="text-muted-foreground font-body text-sm"
               data-ocid="admin.delete.cancel_button"
             >
@@ -840,10 +793,15 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
             </Button>
             <Button
               onClick={() => deleteId && handleDelete(deleteId)}
+              disabled={isDeleting}
               className="bg-destructive hover:bg-destructive/80 text-destructive-foreground font-body font-semibold gap-2"
               data-ocid="admin.delete.confirm_button"
             >
-              <Trash2 className="w-4 h-4" />
+              {isDeleting ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <Trash2 className="w-4 h-4" />
+              )}
               Delete
             </Button>
           </DialogFooter>
@@ -853,7 +811,11 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
       {/* Content Viewer */}
       {viewerItem && (
         <ContentViewerModal
-          item={viewerItem}
+          title={viewerItem.item.title}
+          batch={viewerItem.item.batch}
+          section={viewerItem.item.section}
+          fileType={viewerItem.item.fileType}
+          fileUrl={viewerItem.url}
           onClose={() => setViewerItem(null)}
         />
       )}
