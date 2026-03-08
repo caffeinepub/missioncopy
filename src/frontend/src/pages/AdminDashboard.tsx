@@ -14,7 +14,6 @@ import { Progress } from "@/components/ui/progress";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { useStorageClient } from "@/hooks/useStorageClient";
 import {
   BATCHES,
   type ContentItem,
@@ -57,8 +56,6 @@ function generateId(): string {
 }
 
 export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
-  const storageClient = useStorageClient();
-
   const [selectedBatch, setSelectedBatch] = useState<string>(BATCHES[0]);
   const [selectedSection, setSelectedSection] = useState<string>(SECTIONS[0]);
   const [contentItems, setContentItems] = useState<ContentItem[]>(getContent);
@@ -116,7 +113,7 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
     [uploadTitle],
   );
 
-  const handleUpload = async () => {
+  const handleUpload = () => {
     if (!uploadTitle.trim()) {
       toast.error("Please enter a title");
       return;
@@ -129,15 +126,22 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
     setIsUploading(true);
     setUploadProgress(0);
 
-    try {
-      const bytes = new Uint8Array(await uploadFile.arrayBuffer());
-      const { hash } = await storageClient.putFile(bytes, (pct) => {
-        setUploadProgress(pct);
-      });
+    const isVideo =
+      uploadFile.name.toLowerCase().endsWith(".mp4") ||
+      uploadFile.type.startsWith("video/");
 
-      const isVideo =
-        uploadFile.name.toLowerCase().endsWith(".mp4") ||
-        uploadFile.type.startsWith("video/");
+    const reader = new FileReader();
+
+    reader.onprogress = (event) => {
+      if (event.lengthComputable) {
+        const pct = Math.round((event.loaded / event.total) * 90);
+        setUploadProgress(pct);
+      }
+    };
+
+    reader.onload = () => {
+      const fileData = reader.result as string;
+      setUploadProgress(100);
 
       const newItem: ContentItem = {
         id: generateId(),
@@ -145,23 +149,27 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
         section: selectedSection,
         title: uploadTitle.trim(),
         fileType: isVideo ? "video" : "pdf",
-        blobHash: hash,
+        fileData,
         uploadedAt: Date.now(),
       };
 
       addContentItem(newItem);
       setContentItems(getContent());
+      setIsUploading(false);
       setUploadOpen(false);
       setUploadTitle("");
       setUploadFile(null);
       setUploadProgress(0);
       toast.success("Content uploaded successfully");
-    } catch (err) {
-      console.error(err);
+    };
+
+    reader.onerror = () => {
+      console.error("FileReader error:", reader.error);
       toast.error("Upload failed. Please try again.");
-    } finally {
       setIsUploading(false);
-    }
+    };
+
+    reader.readAsDataURL(uploadFile);
   };
 
   const handleGenerateInvite = async () => {
@@ -846,7 +854,6 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
       {viewerItem && (
         <ContentViewerModal
           item={viewerItem}
-          storageClient={storageClient}
           onClose={() => setViewerItem(null)}
         />
       )}

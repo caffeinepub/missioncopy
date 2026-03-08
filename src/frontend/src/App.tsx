@@ -1,12 +1,13 @@
 import { Toaster } from "@/components/ui/sonner";
 import AdminDashboard from "@/pages/AdminDashboard";
 import LandingPage from "@/pages/LandingPage";
+import StudentEnrollmentPage from "@/pages/StudentEnrollmentPage";
 import StudentView from "@/pages/StudentView";
 import { ADMIN_SESSION_KEY } from "@/types/missioncopy";
 import { findInviteByCode } from "@/utils/storage";
 import { useEffect, useState } from "react";
 
-export type AppRoute = "landing" | "admin" | "student";
+export type AppRoute = "landing" | "admin" | "student" | "enrollment";
 
 export interface AppState {
   route: AppRoute;
@@ -18,12 +19,12 @@ function parseInitialRoute(): AppState {
   const params = new URLSearchParams(window.location.search);
   const inviteCode = params.get("invite");
 
-  // Check for invite in URL → go to student
+  // Check for invite in URL → go to enrollment first
   if (inviteCode) {
     const token = findInviteByCode(inviteCode);
     if (token) {
       return {
-        route: "student",
+        route: "enrollment",
         studentBatch: token.batch,
         studentToken: inviteCode,
       };
@@ -44,7 +45,7 @@ function parseInitialRoute(): AppState {
     const batchParam = params.get("batch");
     if (tokenParam && batchParam) {
       return {
-        route: "student",
+        route: "enrollment",
         studentBatch: batchParam,
         studentToken: tokenParam,
       };
@@ -61,7 +62,10 @@ export default function App() {
   useEffect(() => {
     if (appState.route === "admin") {
       window.history.pushState({}, "", "/admin");
-    } else if (appState.route === "student" && appState.studentBatch) {
+    } else if (
+      (appState.route === "student" || appState.route === "enrollment") &&
+      appState.studentBatch
+    ) {
       const params = new URLSearchParams({
         batch: appState.studentBatch,
         token: appState.studentToken || "",
@@ -94,7 +98,7 @@ export default function App() {
           onAdminLogin={() => navigate({ route: "admin" })}
           onStudentAccess={(batch, token) =>
             navigate({
-              route: "student",
+              route: "enrollment",
               studentBatch: batch,
               studentToken: token,
             })
@@ -107,6 +111,18 @@ export default function App() {
             sessionStorage.removeItem(ADMIN_SESSION_KEY);
             navigate({ route: "landing" });
           }}
+        />
+      )}
+      {appState.route === "enrollment" && (
+        <StudentEnrollmentPage
+          batch={appState.studentBatch || ""}
+          onEnter={() =>
+            navigate({
+              route: "student",
+              studentBatch: appState.studentBatch,
+              studentToken: appState.studentToken,
+            })
+          }
         />
       )}
       {appState.route === "student" && (

@@ -16,7 +16,7 @@ export interface ContentItem {
   section: string;
   title: string;
   fileType: "video" | "pdf";
-  blobHash: string;
+  fileData: string; // base64 data URL: "data:video/mp4;base64,..." or "data:application/pdf;base64,..."
   uploadedAt: number;
 }
 

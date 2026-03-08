@@ -1,9 +1,7 @@
 import ContentViewerModal from "@/components/ContentViewerModal";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { useStorageClient } from "@/hooks/useStorageClient";
 import { type ContentItem, SECTIONS } from "@/types/missioncopy";
 import { getContent } from "@/utils/storage";
 import {
@@ -23,7 +21,6 @@ interface StudentViewProps {
 }
 
 export default function StudentView({ batch, onBack }: StudentViewProps) {
-  const storageClient = useStorageClient();
   const [selectedSection, setSelectedSection] = useState<string>(SECTIONS[0]);
   const [viewerItem, setViewerItem] = useState<ContentItem | null>(null);
 
@@ -267,7 +264,6 @@ export default function StudentView({ batch, onBack }: StudentViewProps) {
       {viewerItem && (
         <ContentViewerModal
           item={viewerItem}
-          storageClient={storageClient}
           onClose={() => setViewerItem(null)}
         />
       )}
