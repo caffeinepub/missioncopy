@@ -19,12 +19,12 @@ function parseInitialRoute(): AppState {
   const params = new URLSearchParams(window.location.search);
   const inviteCode = params.get("invite");
 
-  // Check for invite in URL → go to enrollment first
+  // Check for invite in URL → go directly to student view (skip enrollment)
   if (inviteCode) {
     const token = findInviteByCode(inviteCode);
     if (token) {
       return {
-        route: "enrollment",
+        route: "student",
         studentBatch: token.batch,
         studentToken: inviteCode,
       };
@@ -39,13 +39,13 @@ function parseInitialRoute(): AppState {
     }
   }
 
-  // Check for /student path
+  // Check for /student path → go directly to student view (skip enrollment)
   if (path.includes("/student")) {
     const tokenParam = params.get("token");
     const batchParam = params.get("batch");
     if (tokenParam && batchParam) {
       return {
-        route: "enrollment",
+        route: "student",
         studentBatch: batchParam,
         studentToken: tokenParam,
       };
@@ -94,16 +94,7 @@ export default function App() {
         }}
       />
       {appState.route === "landing" && (
-        <LandingPage
-          onAdminLogin={() => navigate({ route: "admin" })}
-          onStudentAccess={(batch, token) =>
-            navigate({
-              route: "enrollment",
-              studentBatch: batch,
-              studentToken: token,
-            })
-          }
-        />
+        <LandingPage onAdminLogin={() => navigate({ route: "admin" })} />
       )}
       {appState.route === "admin" && (
         <AdminDashboard

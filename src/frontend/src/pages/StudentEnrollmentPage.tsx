@@ -2,6 +2,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ArrowRight, BookOpen, FileText, MessageCircle } from "lucide-react";
 import { motion } from "motion/react";
+import { useEffect } from "react";
 
 interface StudentEnrollmentPageProps {
   batch: string;
@@ -36,6 +37,11 @@ export default function StudentEnrollmentPage({
   batch,
   onEnter,
 }: StudentEnrollmentPageProps) {
+  // Auto-redirect immediately on mount — enrollment page is just a safety fallback
+  useEffect(() => {
+    onEnter();
+  }, [onEnter]);
+
   return (
     <div className="min-h-screen bg-background flex flex-col relative overflow-hidden">
       {/* Background geometric pattern */}

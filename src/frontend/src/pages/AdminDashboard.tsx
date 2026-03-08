@@ -627,7 +627,7 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
                         Drop file here or click to browse
                       </p>
                       <p className="text-muted-foreground/50 text-xs mt-1 font-body">
-                        Supports MP4 and PDF
+                        Supports MP4 and PDF · Up to 1 GB
                       </p>
                     </>
                   )}

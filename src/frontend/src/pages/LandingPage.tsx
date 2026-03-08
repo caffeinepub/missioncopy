@@ -8,35 +8,19 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ADMIN_PASSWORD, ADMIN_SESSION_KEY } from "@/types/missioncopy";
-import { findInviteByCode } from "@/utils/storage";
-import { ArrowRight, BookOpen, Lock, Shield, Users, Zap } from "lucide-react";
+import { BookOpen, Lock, Shield, Users, Zap } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
-import { useEffect, useState } from "react";
-import { toast } from "sonner";
+import { useState } from "react";
 
 interface LandingPageProps {
   onAdminLogin: () => void;
-  onStudentAccess: (batch: string, token: string) => void;
 }
 
-export default function LandingPage({
-  onAdminLogin,
-  onStudentAccess,
-}: LandingPageProps) {
+export default function LandingPage({ onAdminLogin }: LandingPageProps) {
   const [showAdminModal, setShowAdminModal] = useState(false);
   const [adminPassword, setAdminPassword] = useState("");
-  const [inviteCode, setInviteCode] = useState("");
   const [passwordError, setPasswordError] = useState("");
   const [isLoggingIn, setIsLoggingIn] = useState(false);
-
-  // Auto-fill invite from URL
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const invite = params.get("invite");
-    if (invite) {
-      setInviteCode(invite);
-    }
-  }, []);
 
   const handleAdminLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -53,22 +37,6 @@ export default function LandingPage({
       setPasswordError("Incorrect password. Please try again.");
       setIsLoggingIn(false);
     }
-  };
-
-  const handleStudentAccess = () => {
-    const code = inviteCode.trim();
-    if (!code) {
-      toast.error("Please enter your invite code");
-      return;
-    }
-
-    const token = findInviteByCode(code);
-    if (!token) {
-      toast.error("Invalid invite code. Please check with your admin.");
-      return;
-    }
-
-    onStudentAccess(token.batch, code);
   };
 
   return (
@@ -204,43 +172,17 @@ export default function LandingPage({
             ))}
           </motion.div>
 
-          {/* Student Access Card */}
+          {/* Admin access note */}
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.5, delay: 0.4 }}
-            className="max-w-sm mx-auto"
+            className="flex justify-center"
           >
-            <div className="bg-brand-surface border border-border/60 rounded-lg p-6 shadow-red-sm">
-              <div className="flex items-center gap-2 mb-4">
-                <div className="w-1.5 h-5 bg-brand-red rounded-full" />
-                <p className="text-foreground font-display font-bold text-base">
-                  Student Access
-                </p>
-              </div>
-              <p className="text-muted-foreground text-sm mb-4 font-body">
-                Enter your invite code from your batch coordinator to access
-                course materials.
-              </p>
-              <div className="flex gap-2">
-                <Input
-                  placeholder="Enter invite code..."
-                  value={inviteCode}
-                  onChange={(e) => setInviteCode(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && handleStudentAccess()}
-                  className="bg-background border-border/50 text-foreground placeholder:text-muted-foreground/50 font-mono text-sm focus-visible:ring-brand-red focus-visible:border-brand-red"
-                  data-ocid="landing.student_input"
-                />
-                <Button
-                  onClick={handleStudentAccess}
-                  className="bg-brand-red hover:bg-brand-red-bright text-white border-0 gap-1.5 shrink-0 font-body font-semibold"
-                  data-ocid="landing.student_button"
-                >
-                  Access
-                  <ArrowRight className="w-4 h-4" />
-                </Button>
-              </div>
-            </div>
+            <p className="text-muted-foreground/50 text-xs font-body">
+              Students access content via invite link provided by their batch
+              coordinator
+            </p>
           </motion.div>
         </motion.div>
       </main>
