@@ -29,9 +29,11 @@ export interface backendInterface {
     generateInviteCode(): Promise<string>;
     getAllRSVPs(): Promise<Array<RSVP>>;
     getCallerUserRole(): Promise<UserRole>;
+    getContentItems(): Promise<string>;
     getInviteCodes(): Promise<Array<InviteCode>>;
-    isCallerAdmin(): Promise<boolean>;
-    submitRSVP(name: string, attending: boolean, inviteCode: string): Promise<void>;
-    setManifestHash(hash: string): Promise<void>;
     getManifestHash(): Promise<string | null>;
+    isCallerAdmin(): Promise<boolean>;
+    setContentItems(json: string): Promise<void>;
+    setManifestHash(hash: string): Promise<void>;
+    submitRSVP(name: string, attending: boolean, inviteCode: string): Promise<void>;
 }

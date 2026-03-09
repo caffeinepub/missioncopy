@@ -57,8 +57,12 @@ export interface _SERVICE {
   'generateInviteCode' : ActorMethod<[], string>,
   'getAllRSVPs' : ActorMethod<[], Array<RSVP>>,
   'getCallerUserRole' : ActorMethod<[], UserRole>,
+  'getContentItems' : ActorMethod<[], string>,
   'getInviteCodes' : ActorMethod<[], Array<InviteCode>>,
+  'getManifestHash' : ActorMethod<[], [] | [string]>,
   'isCallerAdmin' : ActorMethod<[], boolean>,
+  'setContentItems' : ActorMethod<[string], undefined>,
+  'setManifestHash' : ActorMethod<[string], undefined>,
   'submitRSVP' : ActorMethod<[string, boolean, string], undefined>,
 }
 export declare const idlService: IDL.ServiceClass;

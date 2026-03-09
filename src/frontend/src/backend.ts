@@ -129,8 +129,12 @@ export interface backendInterface {
     generateInviteCode(): Promise<string>;
     getAllRSVPs(): Promise<Array<RSVP>>;
     getCallerUserRole(): Promise<UserRole>;
+    getContentItems(): Promise<string>;
     getInviteCodes(): Promise<Array<InviteCode>>;
+    getManifestHash(): Promise<string | null>;
     isCallerAdmin(): Promise<boolean>;
+    setContentItems(json: string): Promise<void>;
+    setManifestHash(hash: string): Promise<void>;
     submitRSVP(name: string, attending: boolean, inviteCode: string): Promise<void>;
 }
 import type { UserRole as _UserRole, _CaffeineStorageRefillInformation as __CaffeineStorageRefillInformation, _CaffeineStorageRefillResult as __CaffeineStorageRefillResult } from "./declarations/backend.did.d.ts";
@@ -290,6 +294,20 @@ export class Backend implements backendInterface {
             return from_candid_UserRole_n10(this._uploadFile, this._downloadFile, result);
         }
     }
+    async getContentItems(): Promise<string> {
+        if (this.processError) {
+            try {
+                const result = await this.actor.getContentItems();
+                return result;
+            } catch (e) {
+                this.processError(e);
+                throw new Error("unreachable");
+            }
+        } else {
+            const result = await this.actor.getContentItems();
+            return result;
+        }
+    }
     async getInviteCodes(): Promise<Array<InviteCode>> {
         if (this.processError) {
             try {
@@ -304,6 +322,20 @@ export class Backend implements backendInterface {
             return result;
         }
     }
+    async getManifestHash(): Promise<string | null> {
+        if (this.processError) {
+            try {
+                const result = await this.actor.getManifestHash();
+                return result.length === 0 ? null : result[0];
+            } catch (e) {
+                this.processError(e);
+                throw new Error("unreachable");
+            }
+        } else {
+            const result = await this.actor.getManifestHash();
+            return result.length === 0 ? null : result[0];
+        }
+    }
     async isCallerAdmin(): Promise<boolean> {
         if (this.processError) {
             try {
@@ -315,6 +347,34 @@ export class Backend implements backendInterface {
             }
         } else {
             const result = await this.actor.isCallerAdmin();
+            return result;
+        }
+    }
+    async setContentItems(arg0: string): Promise<void> {
+        if (this.processError) {
+            try {
+                const result = await this.actor.setContentItems(arg0);
+                return result;
+            } catch (e) {
+                this.processError(e);
+                throw new Error("unreachable");
+            }
+        } else {
+            const result = await this.actor.setContentItems(arg0);
+            return result;
+        }
+    }
+    async setManifestHash(arg0: string): Promise<void> {
+        if (this.processError) {
+            try {
+                const result = await this.actor.setManifestHash(arg0);
+                return result;
+            } catch (e) {
+                this.processError(e);
+                throw new Error("unreachable");
+            }
+        } else {
+            const result = await this.actor.setManifestHash(arg0);
             return result;
         }
     }

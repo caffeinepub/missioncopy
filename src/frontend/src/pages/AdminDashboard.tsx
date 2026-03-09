@@ -43,13 +43,6 @@ interface AdminDashboardProps {
   onLogout: () => void;
 }
 
-// Extended actor type with content storage methods
-interface ActorWithContent {
-  setContentItems(json: string): Promise<void>;
-  getContentItems(): Promise<string>;
-  setManifestHash(hash: string): Promise<void>;
-}
-
 function generateId(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
@@ -124,7 +117,7 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
     if (actor) {
       try {
         const json = JSON.stringify(items);
-        await (actor as unknown as ActorWithContent).setContentItems(json);
+        await actor.setContentItems(json);
       } catch (err) {
         console.warn("Could not persist content items to backend:", err);
         // Non-fatal — content uploaded, just backend list not updated

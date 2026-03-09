@@ -1,3 +1,4 @@
+import type { backendInterface } from "@/backend";
 import ContentViewerModal from "@/components/ContentViewerModal";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -27,11 +28,6 @@ interface StudentViewProps {
   onBack: () => void;
 }
 
-// Extended actor type with content items method
-interface ActorWithContent {
-  getContentItems(): Promise<string>;
-}
-
 export default function StudentView({ batch, onBack }: StudentViewProps) {
   const storageClient = useStorageClient();
   const { actor, isFetching: actorFetching } = useActor();
@@ -50,7 +46,7 @@ export default function StudentView({ batch, onBack }: StudentViewProps) {
   // Load content items directly from the backend canister
   // This bypasses storage gateway entirely for listing — much more reliable
   const loadContent = async (
-    actorInstance: ActorWithContent | null,
+    actorInstance: backendInterface | null,
     isRetry = false,
   ) => {
     if (isRetry) {
@@ -100,7 +96,7 @@ export default function StudentView({ batch, onBack }: StudentViewProps) {
     if (actorFetching) return;
 
     if (actor) {
-      loadContent(actor as unknown as ActorWithContent);
+      loadContent(actor);
     } else {
       // Actor not available — try cache
       loadContent(null);
@@ -131,7 +127,7 @@ export default function StudentView({ batch, onBack }: StudentViewProps) {
 
   const handleRetry = () => {
     loadAttempted.current = false;
-    loadContent(actor as unknown as ActorWithContent | null, true);
+    loadContent(actor, true);
   };
 
   const formatDate = (ts: number) => {

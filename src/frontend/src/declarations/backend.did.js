@@ -69,8 +69,12 @@ export const idlService = IDL.Service({
   'generateInviteCode' : IDL.Func([], [IDL.Text], []),
   'getAllRSVPs' : IDL.Func([], [IDL.Vec(RSVP)], ['query']),
   'getCallerUserRole' : IDL.Func([], [UserRole], ['query']),
+  'getContentItems' : IDL.Func([], [IDL.Text], ['query']),
   'getInviteCodes' : IDL.Func([], [IDL.Vec(InviteCode)], ['query']),
+  'getManifestHash' : IDL.Func([], [IDL.Opt(IDL.Text)], ['query']),
   'isCallerAdmin' : IDL.Func([], [IDL.Bool], ['query']),
+  'setContentItems' : IDL.Func([IDL.Text], [], []),
+  'setManifestHash' : IDL.Func([IDL.Text], [], []),
   'submitRSVP' : IDL.Func([IDL.Text, IDL.Bool, IDL.Text], [], []),
 });
 
@@ -138,8 +142,12 @@ export const idlFactory = ({ IDL }) => {
     'generateInviteCode' : IDL.Func([], [IDL.Text], []),
     'getAllRSVPs' : IDL.Func([], [IDL.Vec(RSVP)], ['query']),
     'getCallerUserRole' : IDL.Func([], [UserRole], ['query']),
+    'getContentItems' : IDL.Func([], [IDL.Text], ['query']),
     'getInviteCodes' : IDL.Func([], [IDL.Vec(InviteCode)], ['query']),
+    'getManifestHash' : IDL.Func([], [IDL.Opt(IDL.Text)], ['query']),
     'isCallerAdmin' : IDL.Func([], [IDL.Bool], ['query']),
+    'setContentItems' : IDL.Func([IDL.Text], [], []),
+    'setManifestHash' : IDL.Func([IDL.Text], [], []),
     'submitRSVP' : IDL.Func([IDL.Text, IDL.Bool, IDL.Text], [], []),
   });
 };
