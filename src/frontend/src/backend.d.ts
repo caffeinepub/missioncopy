@@ -32,4 +32,6 @@ export interface backendInterface {
     getInviteCodes(): Promise<Array<InviteCode>>;
     isCallerAdmin(): Promise<boolean>;
     submitRSVP(name: string, attending: boolean, inviteCode: string): Promise<void>;
+    setManifestHash(hash: string): Promise<void>;
+    getManifestHash(): Promise<string | null>;
 }

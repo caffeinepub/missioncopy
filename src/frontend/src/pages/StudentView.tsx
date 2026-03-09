@@ -3,9 +3,15 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { useActor } from "@/hooks/useActor";
 import { useStorageClient } from "@/hooks/useStorageClient";
 import { type ContentItem, SECTIONS } from "@/types/missioncopy";
-import { fetchManifest } from "@/utils/storage";
+import {
+  fetchManifest,
+  getLocalManifestHash,
+  saveLocalManifestHash,
+  saveLocalManifestItems,
+} from "@/utils/storage";
 import {
   ArrowLeft,
   Calendar,
@@ -17,7 +23,7 @@ import {
   Video,
 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
 interface StudentViewProps {
@@ -26,12 +32,18 @@ interface StudentViewProps {
   onBack: () => void;
 }
 
+// Extended actor type with manifest hash method
+interface ActorWithManifest {
+  getManifestHash(): Promise<string | null>;
+}
+
 export default function StudentView({
   batch,
-  manifestHash,
+  manifestHash: manifestHashProp,
   onBack,
 }: StudentViewProps) {
-  const storageClient = useStorageClient();
+  const storageClient = useStorageClient(); // null until canister ID resolves
+  const { actor, isFetching: actorFetching } = useActor();
   const [selectedSection, setSelectedSection] = useState<string>(SECTIONS[0]);
   const [viewerItem, setViewerItem] = useState<{
     item: ContentItem;
@@ -39,43 +51,105 @@ export default function StudentView({
   } | null>(null);
   const [loadingId, setLoadingId] = useState<string | null>(null);
 
-  // Manifest loading state
   const [allContent, setAllContent] = useState<ContentItem[]>([]);
   const [isLoadingManifest, setIsLoadingManifest] = useState(true);
   const [manifestError, setManifestError] = useState<string | null>(null);
+  const loadAttempted = useRef(false);
 
-  useEffect(() => {
-    if (!manifestHash) {
-      setIsLoadingManifest(false);
-      setManifestError(
-        "No content manifest found. Ask your instructor for the link.",
-      );
-      return;
+  // Load content: try backend hash first, then localStorage cache
+  const loadContent = async (
+    actorInstance: ActorWithManifest | null,
+    storage: typeof storageClient,
+    isRetry = false,
+  ) => {
+    if (isRetry) {
+      loadAttempted.current = false;
     }
+    if (loadAttempted.current) return;
+    loadAttempted.current = true;
 
-    let cancelled = false;
     setIsLoadingManifest(true);
     setManifestError(null);
 
-    fetchManifest(storageClient, manifestHash)
-      .then((items) => {
-        if (!cancelled) {
-          setAllContent(items);
-          setIsLoadingManifest(false);
-        }
-      })
-      .catch((err) => {
-        if (!cancelled) {
-          console.error("Manifest fetch error:", err);
-          setManifestError("Could not load content. Please try again.");
-          setIsLoadingManifest(false);
-        }
-      });
+    let hash: string | null = manifestHashProp || null;
 
-    return () => {
-      cancelled = true;
-    };
-  }, [manifestHash, storageClient]);
+    // 1. Try to get the latest hash from the backend canister
+    if (!hash && actorInstance) {
+      try {
+        hash = await (actorInstance as ActorWithManifest).getManifestHash();
+        if (hash) saveLocalManifestHash(hash);
+      } catch (err) {
+        console.warn("Could not fetch manifest hash from backend:", err);
+      }
+    }
+
+    // 2. Fall back to localStorage cache
+    if (!hash) {
+      hash = getLocalManifestHash();
+    }
+
+    if (!hash) {
+      setIsLoadingManifest(false);
+      setManifestError("No content available yet. Check back soon.");
+      return;
+    }
+
+    // 3. Fetch the manifest JSON from blob storage
+    if (!storage) {
+      // Storage not yet initialized — keep showing loading, useEffect will re-run when storage is ready
+      loadAttempted.current = false;
+      return;
+    }
+
+    try {
+      const items = await fetchManifest(storage, hash);
+      saveLocalManifestItems(items);
+      setAllContent(items);
+      setIsLoadingManifest(false);
+    } catch (err) {
+      console.error("Manifest fetch error:", err);
+      // Try localStorage as last resort
+      try {
+        const cachedRaw = localStorage.getItem("missioncopy_content_items");
+        if (cachedRaw) {
+          const cached = JSON.parse(cachedRaw) as ContentItem[];
+          setAllContent(cached);
+          setIsLoadingManifest(false);
+          toast.info("Showing cached content — may not be the latest.");
+          return;
+        }
+      } catch {
+        // ignore
+      }
+      setManifestError(
+        "Could not load content. Please check your connection and try again.",
+      );
+      setIsLoadingManifest(false);
+    }
+  };
+
+  // Trigger load once actor AND storageClient are both available
+  // biome-ignore lint/correctness/useExhaustiveDependencies: loadContent is intentionally excluded to avoid re-runs
+  useEffect(() => {
+    if (actorFetching) return; // wait for actor to finish initializing
+    if (!storageClient) return; // wait for storage client to be ready
+
+    const cachedHash = manifestHashProp || getLocalManifestHash();
+
+    if (actor) {
+      // Actor ready — load using backend hash
+      loadContent(actor as unknown as ActorWithManifest, storageClient);
+    } else if (cachedHash) {
+      // No actor yet but we have a cached hash — load from cache immediately
+      loadContent(null, storageClient);
+    } else {
+      // Actor failed and no cache — show error
+      setIsLoadingManifest(false);
+      setManifestError(
+        "Could not connect to server. Please check your connection.",
+      );
+    }
+  }, [actor, actorFetching, manifestHashProp, storageClient]);
 
   const batchContent = allContent.filter((item) => item.batch === batch);
   const sectionContent = batchContent.filter(
@@ -83,6 +157,10 @@ export default function StudentView({
   );
 
   const handleOpenItem = async (item: ContentItem) => {
+    if (!storageClient) {
+      toast.error("Storage is still initializing. Please wait a moment.");
+      return;
+    }
     setLoadingId(item.id);
     try {
       const url = await storageClient.getDirectURL(item.fileHash);
@@ -96,18 +174,12 @@ export default function StudentView({
   };
 
   const handleRetry = () => {
-    setManifestError(null);
-    setIsLoadingManifest(true);
-    fetchManifest(storageClient, manifestHash)
-      .then((items) => {
-        setAllContent(items);
-        setIsLoadingManifest(false);
-      })
-      .catch((err) => {
-        console.error(err);
-        setManifestError("Could not load content. Please try again.");
-        setIsLoadingManifest(false);
-      });
+    loadAttempted.current = false;
+    loadContent(
+      actor as unknown as ActorWithManifest | null,
+      storageClient,
+      true,
+    );
   };
 
   const formatDate = (ts: number) => {
@@ -171,6 +243,19 @@ export default function StudentView({
         </motion.div>
       </div>
 
+      {/* Loading state for actor/storage init */}
+      {isLoadingManifest && (actorFetching || !storageClient) && (
+        <div
+          className="flex flex-col items-center justify-center flex-1 py-20 gap-3"
+          data-ocid="student.content.loading_state"
+        >
+          <Loader2 className="w-8 h-8 text-brand-red animate-spin" />
+          <p className="text-muted-foreground text-sm font-body">
+            Loading content...
+          </p>
+        </div>
+      )}
+
       {/* Error state */}
       {manifestError && !isLoadingManifest && (
         <div
@@ -184,7 +269,7 @@ export default function StudentView({
             {manifestError}
           </p>
           <p className="text-muted-foreground/50 text-xs font-body mb-4">
-            Make sure you have a valid access link
+            Please try again or contact your instructor
           </p>
           <Button
             size="sm"
@@ -200,7 +285,7 @@ export default function StudentView({
       )}
 
       {/* Section Tabs */}
-      {!manifestError && (
+      {!manifestError && !actorFetching && storageClient && (
         <Tabs
           value={selectedSection}
           onValueChange={setSelectedSection}
@@ -244,7 +329,6 @@ export default function StudentView({
               className="flex-1 px-4 md:px-8 py-6 mt-0"
             >
               {isLoadingManifest ? (
-                /* Loading skeletons */
                 <div
                   className="max-w-3xl space-y-2"
                   data-ocid="student.content.loading_state"

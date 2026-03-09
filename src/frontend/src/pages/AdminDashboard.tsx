@@ -14,10 +14,10 @@ import { Progress } from "@/components/ui/progress";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { useActor } from "@/hooks/useActor";
 import { useStorageClient } from "@/hooks/useStorageClient";
 import { BATCHES, type ContentItem, SECTIONS } from "@/types/missioncopy";
 import {
-  getLocalManifestHash,
   getLocalManifestItems,
   saveLocalManifestHash,
   saveLocalManifestItems,
@@ -26,12 +26,9 @@ import {
 } from "@/utils/storage";
 import {
   Calendar,
-  Check,
   ChevronRight,
-  Copy,
   ExternalLink,
   FileText,
-  Link2,
   Loader2,
   LogOut,
   Play,
@@ -48,19 +45,23 @@ interface AdminDashboardProps {
   onLogout: () => void;
 }
 
+// Extended actor type with manifest hash methods (added to backend but not yet in generated types)
+interface ActorWithManifest {
+  setManifestHash(hash: string): Promise<void>;
+  getManifestHash(): Promise<string | null>;
+}
+
 function generateId(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
 export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
-  const storageClient = useStorageClient();
+  const storageClient = useStorageClient(); // null until canister ID resolves
+  const { actor } = useActor();
   const [selectedBatch, setSelectedBatch] = useState<string>(BATCHES[0]);
   const [selectedSection, setSelectedSection] = useState<string>(SECTIONS[0]);
   const [contentItems, setContentItems] = useState<ContentItem[]>(() =>
     getLocalManifestItems(),
-  );
-  const [manifestHash, setManifestHash] = useState<string | null>(() =>
-    getLocalManifestHash(),
   );
 
   // Upload state
@@ -85,36 +86,9 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
 
-  // Copy link state
-  const [copiedBatch, setCopiedBatch] = useState<string | null>(null);
-
   const filteredContent = contentItems.filter(
     (item) => item.batch === selectedBatch && item.section === selectedSection,
   );
-
-  const getStudentLink = (batch?: string) => {
-    if (!manifestHash) return "";
-    const base = window.location.origin;
-    const params = new URLSearchParams({ manifest: manifestHash });
-    if (batch) params.set("batch", batch);
-    return `${base}/?${params.toString()}`;
-  };
-
-  const handleCopyBatchLink = async (batch: string) => {
-    const link = getStudentLink(batch);
-    if (!link) {
-      toast.error("No manifest yet. Upload content first.");
-      return;
-    }
-    try {
-      await navigator.clipboard.writeText(link);
-      setCopiedBatch(batch);
-      toast.success(`Link for ${batch} copied!`);
-      setTimeout(() => setCopiedBatch(null), 2500);
-    } catch {
-      toast.error("Could not copy to clipboard.");
-    }
-  };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -152,6 +126,13 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
       return;
     }
 
+    if (!storageClient) {
+      toast.error(
+        "Storage is still initializing. Please wait a moment and try again.",
+      );
+      return;
+    }
+
     setIsUploading(true);
     setUploadProgress(0);
     setUploadStatus("uploading-file");
@@ -160,16 +141,23 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
       uploadFile.name.toLowerCase().endsWith(".mp4") ||
       uploadFile.type.startsWith("video/");
 
+    let fileHash: string;
     try {
-      // 1. Upload the file bytes to blob storage
-      const fileHash = await uploadFileToStorage(
-        storageClient,
-        uploadFile,
-        (pct) => {
-          setUploadProgress(Math.round(pct * 0.8)); // 0-80% for file upload
-        },
-      );
+      // 1. Upload the file to blob storage
+      fileHash = await uploadFileToStorage(storageClient, uploadFile, (pct) => {
+        setUploadProgress(Math.round(pct * 80)); // 0-80%
+      });
+    } catch (err) {
+      console.error("File upload error:", err);
+      const msg = err instanceof Error ? err.message : String(err);
+      toast.error(`Upload failed: ${msg.slice(0, 120)}`);
+      setIsUploading(false);
+      setUploadProgress(0);
+      setUploadStatus("idle");
+      return;
+    }
 
+    try {
       setUploadStatus("uploading-manifest");
       setUploadProgress(85);
 
@@ -188,13 +176,26 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
       // 2. Upload the manifest
       const newManifestHash = await uploadManifest(storageClient, updatedItems);
 
+      setUploadProgress(95);
+
+      // 3. Persist manifest hash to backend so students on any device can fetch it
+      if (actor) {
+        try {
+          await (actor as unknown as ActorWithManifest).setManifestHash(
+            newManifestHash,
+          );
+        } catch (err) {
+          console.warn("Could not persist manifest hash to backend:", err);
+          // Non-fatal — content is still uploaded, just backend pointer not updated
+        }
+      }
+
       setUploadProgress(100);
 
-      // 3. Save locally
+      // 4. Save locally as a cache
       saveLocalManifestItems(updatedItems);
       saveLocalManifestHash(newManifestHash);
       setContentItems(updatedItems);
-      setManifestHash(newManifestHash);
       setUploadStatus("done");
 
       setTimeout(() => {
@@ -208,8 +209,8 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
 
       toast.success("Content uploaded — students can see it now!");
     } catch (err) {
-      console.error("Upload error:", err);
-      toast.error("Upload failed. Please check your connection and try again.");
+      console.error("Manifest upload error:", err);
+      toast.error("Upload failed while saving content list. Please try again.");
       setIsUploading(false);
       setUploadProgress(0);
       setUploadStatus("idle");
@@ -217,6 +218,10 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
   };
 
   const handleOpenViewer = async (item: ContentItem) => {
+    if (!storageClient) {
+      toast.error("Storage is still initializing. Please try again.");
+      return;
+    }
     setViewerLoading(true);
     try {
       const url = await storageClient.getDirectURL(item.fileHash);
@@ -230,14 +235,27 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
   };
 
   const handleDelete = async (id: string) => {
+    if (!storageClient) {
+      toast.error("Storage is still initializing. Please try again.");
+      return;
+    }
     setIsDeleting(true);
     try {
       const updatedItems = contentItems.filter((i) => i.id !== id);
       const newManifestHash = await uploadManifest(storageClient, updatedItems);
+      // Persist updated manifest hash to backend
+      if (actor) {
+        try {
+          await (actor as unknown as ActorWithManifest).setManifestHash(
+            newManifestHash,
+          );
+        } catch (err) {
+          console.warn("Could not persist manifest hash to backend:", err);
+        }
+      }
       saveLocalManifestItems(updatedItems);
       saveLocalManifestHash(newManifestHash);
       setContentItems(updatedItems);
-      setManifestHash(newManifestHash);
       setDeleteId(null);
       toast.success("Content deleted");
     } catch (err) {
@@ -339,39 +357,6 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
               </button>
             ))}
           </div>
-
-          {/* Student Access Share */}
-          <div className="p-3 border-t border-border/30 mt-auto space-y-2">
-            <p className="text-[10px] text-muted-foreground/60 font-body uppercase tracking-widest flex items-center gap-1">
-              <Link2 className="w-3 h-3" />
-              Student Links
-            </p>
-            {manifestHash ? (
-              <div className="space-y-1">
-                {BATCHES.map((batch) => (
-                  <button
-                    key={batch}
-                    type="button"
-                    onClick={() => handleCopyBatchLink(batch)}
-                    className="w-full text-left px-2 py-1.5 rounded text-[11px] font-body text-muted-foreground hover:text-foreground hover:bg-brand-surface-2 flex items-center gap-1.5 transition-all"
-                    data-ocid="admin.student.link.button"
-                    title={`Copy student link for ${batch}`}
-                  >
-                    {copiedBatch === batch ? (
-                      <Check className="w-3 h-3 text-green-500 shrink-0" />
-                    ) : (
-                      <Copy className="w-3 h-3 shrink-0 opacity-50" />
-                    )}
-                    <span className="truncate">{batch}</span>
-                  </button>
-                ))}
-              </div>
-            ) : (
-              <p className="text-[10px] text-muted-foreground/40 font-body">
-                Upload content to generate links
-              </p>
-            )}
-          </div>
         </aside>
 
         {/* Mobile Batch Selector */}
@@ -411,23 +396,6 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
               </p>
             </div>
             <div className="flex items-center gap-2 shrink-0">
-              {/* Mobile: copy link button */}
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => handleCopyBatchLink(selectedBatch)}
-                disabled={!manifestHash}
-                className="border-border/40 text-muted-foreground hover:text-foreground hover:border-brand-red/40 gap-1.5 font-body text-xs md:hidden"
-                data-ocid="admin.student.link.button"
-              >
-                {copiedBatch === selectedBatch ? (
-                  <Check className="w-3.5 h-3.5 text-green-500" />
-                ) : (
-                  <Copy className="w-3.5 h-3.5" />
-                )}
-                Share
-              </Button>
-
               <Button
                 size="sm"
                 onClick={() => setUploadOpen(true)}
@@ -439,31 +407,6 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
               </Button>
             </div>
           </div>
-
-          {/* Student Access Banner (visible when manifest exists) */}
-          {manifestHash && (
-            <div className="px-4 md:px-6 py-2 bg-green-500/5 border-b border-green-500/10 hidden md:flex items-center gap-3">
-              <div className="w-1.5 h-1.5 rounded-full bg-green-500 shrink-0" />
-              <p className="text-green-400/80 text-xs font-body flex-1">
-                Content is live — students on any device can access it via the
-                batch links
-              </p>
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={() => handleCopyBatchLink(selectedBatch)}
-                className="text-green-400/70 hover:text-green-400 hover:bg-green-500/10 gap-1.5 font-body text-xs h-7 px-2"
-                data-ocid="admin.student.copy_link.button"
-              >
-                {copiedBatch === selectedBatch ? (
-                  <Check className="w-3 h-3" />
-                ) : (
-                  <Copy className="w-3 h-3" />
-                )}
-                Copy {selectedBatch} link
-              </Button>
-            </div>
-          )}
 
           {/* Section Tabs + Content */}
           <Tabs

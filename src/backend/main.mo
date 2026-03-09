@@ -74,6 +74,17 @@ actor {
   // Map to store batch information for invite codes
   let inviteCodeBatches = Map.empty<Text, Batch>();
 
+  // Global manifest hash - admin sets after each upload, students read to load content
+  var manifestHash : ?Text = null;
+
+  public shared func setManifestHash(hash : Text) : async () {
+    manifestHash := ?hash;
+  };
+
+  public query func getManifestHash() : async ?Text {
+    manifestHash;
+  };
+
   public shared ({ caller }) func generateInviteCode() : async Text {
     if (not (AccessControl.hasPermission(accessControlState, caller, #admin))) {
       Runtime.trap("Unauthorized: Only admins can generate invite codes");
