@@ -77,12 +77,26 @@ actor {
   // Global manifest hash - admin sets after each upload, students read to load content
   var manifestHash : ?Text = null;
 
+  // Full content list stored as JSON text - set by admin after upload/delete
+  // Students read this directly so no storage gateway dependency for listing
+  var contentItemsJson : Text = "[]";
+
   public shared func setManifestHash(hash : Text) : async () {
     manifestHash := ?hash;
   };
 
   public query func getManifestHash() : async ?Text {
     manifestHash;
+  };
+
+  // Store the full serialized content list in the canister
+  public shared func setContentItems(json : Text) : async () {
+    contentItemsJson := json;
+  };
+
+  // Students call this to get all content items as JSON
+  public query func getContentItems() : async Text {
+    contentItemsJson;
   };
 
   public shared ({ caller }) func generateInviteCode() : async Text {

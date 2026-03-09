@@ -6,12 +6,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useActor } from "@/hooks/useActor";
 import { useStorageClient } from "@/hooks/useStorageClient";
 import { type ContentItem, SECTIONS } from "@/types/missioncopy";
-import {
-  fetchManifest,
-  getLocalManifestHash,
-  saveLocalManifestHash,
-  saveLocalManifestItems,
-} from "@/utils/storage";
+import { getLocalManifestItems, saveLocalManifestItems } from "@/utils/storage";
 import {
   ArrowLeft,
   Calendar,
@@ -32,17 +27,13 @@ interface StudentViewProps {
   onBack: () => void;
 }
 
-// Extended actor type with manifest hash method
-interface ActorWithManifest {
-  getManifestHash(): Promise<string | null>;
+// Extended actor type with content items method
+interface ActorWithContent {
+  getContentItems(): Promise<string>;
 }
 
-export default function StudentView({
-  batch,
-  manifestHash: manifestHashProp,
-  onBack,
-}: StudentViewProps) {
-  const storageClient = useStorageClient(); // null until canister ID resolves
+export default function StudentView({ batch, onBack }: StudentViewProps) {
+  const storageClient = useStorageClient();
   const { actor, isFetching: actorFetching } = useActor();
   const [selectedSection, setSelectedSection] = useState<string>(SECTIONS[0]);
   const [viewerItem, setViewerItem] = useState<{
@@ -52,14 +43,14 @@ export default function StudentView({
   const [loadingId, setLoadingId] = useState<string | null>(null);
 
   const [allContent, setAllContent] = useState<ContentItem[]>([]);
-  const [isLoadingManifest, setIsLoadingManifest] = useState(true);
-  const [manifestError, setManifestError] = useState<string | null>(null);
+  const [isLoadingContent, setIsLoadingContent] = useState(true);
+  const [contentError, setContentError] = useState<string | null>(null);
   const loadAttempted = useRef(false);
 
-  // Load content: try backend hash first, then localStorage cache
+  // Load content items directly from the backend canister
+  // This bypasses storage gateway entirely for listing — much more reliable
   const loadContent = async (
-    actorInstance: ActorWithManifest | null,
-    storage: typeof storageClient,
+    actorInstance: ActorWithContent | null,
     isRetry = false,
   ) => {
     if (isRetry) {
@@ -68,88 +59,53 @@ export default function StudentView({
     if (loadAttempted.current) return;
     loadAttempted.current = true;
 
-    setIsLoadingManifest(true);
-    setManifestError(null);
+    setIsLoadingContent(true);
+    setContentError(null);
 
-    let hash: string | null = manifestHashProp || null;
-
-    // 1. Try to get the latest hash from the backend canister
-    if (!hash && actorInstance) {
+    // 1. Try to get content items from the backend canister
+    if (actorInstance) {
       try {
-        hash = await (actorInstance as ActorWithManifest).getManifestHash();
-        if (hash) saveLocalManifestHash(hash);
+        const json = await actorInstance.getContentItems();
+        const items = JSON.parse(json) as ContentItem[];
+        // Cache locally for offline/fallback
+        saveLocalManifestItems(items);
+        setAllContent(items);
+        setIsLoadingContent(false);
+        return;
       } catch (err) {
-        console.warn("Could not fetch manifest hash from backend:", err);
+        console.warn("Could not fetch content items from backend:", err);
+        // Fall through to localStorage cache
       }
     }
 
     // 2. Fall back to localStorage cache
-    if (!hash) {
-      hash = getLocalManifestHash();
-    }
-
-    if (!hash) {
-      setIsLoadingManifest(false);
-      setManifestError("No content available yet. Check back soon.");
+    const cached = getLocalManifestItems();
+    if (cached.length > 0) {
+      setAllContent(cached);
+      setIsLoadingContent(false);
+      toast.info("Showing cached content — may not be the latest.");
       return;
     }
 
-    // 3. Fetch the manifest JSON from blob storage
-    if (!storage) {
-      // Storage not yet initialized — keep showing loading, useEffect will re-run when storage is ready
-      loadAttempted.current = false;
-      return;
-    }
-
-    try {
-      const items = await fetchManifest(storage, hash);
-      saveLocalManifestItems(items);
-      setAllContent(items);
-      setIsLoadingManifest(false);
-    } catch (err) {
-      console.error("Manifest fetch error:", err);
-      // Try localStorage as last resort
-      try {
-        const cachedRaw = localStorage.getItem("missioncopy_content_items");
-        if (cachedRaw) {
-          const cached = JSON.parse(cachedRaw) as ContentItem[];
-          setAllContent(cached);
-          setIsLoadingManifest(false);
-          toast.info("Showing cached content — may not be the latest.");
-          return;
-        }
-      } catch {
-        // ignore
-      }
-      setManifestError(
-        "Could not load content. Please check your connection and try again.",
-      );
-      setIsLoadingManifest(false);
-    }
+    // 3. Nothing available
+    setIsLoadingContent(false);
+    setContentError(
+      "No content available yet. Check back soon or contact your instructor.",
+    );
   };
 
-  // Trigger load once actor AND storageClient are both available
-  // biome-ignore lint/correctness/useExhaustiveDependencies: loadContent is intentionally excluded to avoid re-runs
+  // Trigger load once actor is available
+  // biome-ignore lint/correctness/useExhaustiveDependencies: loadContent excluded intentionally
   useEffect(() => {
-    if (actorFetching) return; // wait for actor to finish initializing
-    if (!storageClient) return; // wait for storage client to be ready
-
-    const cachedHash = manifestHashProp || getLocalManifestHash();
+    if (actorFetching) return;
 
     if (actor) {
-      // Actor ready — load using backend hash
-      loadContent(actor as unknown as ActorWithManifest, storageClient);
-    } else if (cachedHash) {
-      // No actor yet but we have a cached hash — load from cache immediately
-      loadContent(null, storageClient);
+      loadContent(actor as unknown as ActorWithContent);
     } else {
-      // Actor failed and no cache — show error
-      setIsLoadingManifest(false);
-      setManifestError(
-        "Could not connect to server. Please check your connection.",
-      );
+      // Actor not available — try cache
+      loadContent(null);
     }
-  }, [actor, actorFetching, manifestHashProp, storageClient]);
+  }, [actor, actorFetching]);
 
   const batchContent = allContent.filter((item) => item.batch === batch);
   const sectionContent = batchContent.filter(
@@ -175,11 +131,7 @@ export default function StudentView({
 
   const handleRetry = () => {
     loadAttempted.current = false;
-    loadContent(
-      actor as unknown as ActorWithManifest | null,
-      storageClient,
-      true,
-    );
+    loadContent(actor as unknown as ActorWithContent | null, true);
   };
 
   const formatDate = (ts: number) => {
@@ -236,15 +188,15 @@ export default function StudentView({
             {batch}
           </h1>
           <p className="text-muted-foreground text-sm font-body mt-1">
-            {isLoadingManifest
+            {isLoadingContent
               ? "Loading content..."
               : `${batchContent.length} resources available across all sections`}
           </p>
         </motion.div>
       </div>
 
-      {/* Loading state for actor/storage init */}
-      {isLoadingManifest && (actorFetching || !storageClient) && (
+      {/* Full-page loading */}
+      {isLoadingContent && (
         <div
           className="flex flex-col items-center justify-center flex-1 py-20 gap-3"
           data-ocid="student.content.loading_state"
@@ -257,7 +209,7 @@ export default function StudentView({
       )}
 
       {/* Error state */}
-      {manifestError && !isLoadingManifest && (
+      {contentError && !isLoadingContent && (
         <div
           className="flex flex-col items-center justify-center flex-1 py-20 text-center px-6"
           data-ocid="student.manifest.error_state"
@@ -266,7 +218,7 @@ export default function StudentView({
             <FileText className="w-6 h-6 text-destructive/50" />
           </div>
           <p className="text-foreground font-body text-sm font-medium mb-1">
-            {manifestError}
+            {contentError}
           </p>
           <p className="text-muted-foreground/50 text-xs font-body mb-4">
             Please try again or contact your instructor
@@ -285,7 +237,7 @@ export default function StudentView({
       )}
 
       {/* Section Tabs */}
-      {!manifestError && !actorFetching && storageClient && (
+      {!contentError && !isLoadingContent && (
         <Tabs
           value={selectedSection}
           onValueChange={setSelectedSection}
@@ -301,22 +253,18 @@ export default function StudentView({
                   data-ocid={`student.section.tab.${idx + 1}`}
                 >
                   {section}
-                  {!isLoadingManifest &&
-                    batchContent.filter((i) => i.section === section).length >
-                      0 && (
-                      <span
-                        className={`ml-1.5 text-[10px] font-mono ${
-                          selectedSection === section
-                            ? "text-white/70"
-                            : "text-muted-foreground/50"
-                        }`}
-                      >
-                        {
-                          batchContent.filter((i) => i.section === section)
-                            .length
-                        }
-                      </span>
-                    )}
+                  {batchContent.filter((i) => i.section === section).length >
+                    0 && (
+                    <span
+                      className={`ml-1.5 text-[10px] font-mono ${
+                        selectedSection === section
+                          ? "text-white/70"
+                          : "text-muted-foreground/50"
+                      }`}
+                    >
+                      {batchContent.filter((i) => i.section === section).length}
+                    </span>
+                  )}
                 </TabsTrigger>
               ))}
             </TabsList>
@@ -328,27 +276,7 @@ export default function StudentView({
               value={section}
               className="flex-1 px-4 md:px-8 py-6 mt-0"
             >
-              {isLoadingManifest ? (
-                <div
-                  className="max-w-3xl space-y-2"
-                  data-ocid="student.content.loading_state"
-                >
-                  {[1, 2, 3].map((n) => (
-                    <div
-                      key={n}
-                      className="flex items-center gap-3 bg-brand-surface border border-border/40 rounded-lg p-3.5"
-                    >
-                      <Skeleton className="w-7 h-7 rounded bg-brand-surface-2" />
-                      <Skeleton className="w-8 h-8 rounded bg-brand-surface-2" />
-                      <div className="flex-1 space-y-1.5">
-                        <Skeleton className="h-4 w-3/5 rounded bg-brand-surface-2" />
-                        <Skeleton className="h-3 w-2/5 rounded bg-brand-surface-2" />
-                      </div>
-                      <Skeleton className="w-8 h-8 rounded-full bg-brand-surface-2" />
-                    </div>
-                  ))}
-                </div>
-              ) : sectionContent.length === 0 ? (
+              {sectionContent.length === 0 ? (
                 <motion.div
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}

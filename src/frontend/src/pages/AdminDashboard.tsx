@@ -19,10 +19,8 @@ import { useAdminStorageClient } from "@/hooks/useAdminStorageClient";
 import { BATCHES, type ContentItem, SECTIONS } from "@/types/missioncopy";
 import {
   getLocalManifestItems,
-  saveLocalManifestHash,
   saveLocalManifestItems,
   uploadFile as uploadFileToStorage,
-  uploadManifest,
 } from "@/utils/storage";
 import {
   Calendar,
@@ -45,10 +43,11 @@ interface AdminDashboardProps {
   onLogout: () => void;
 }
 
-// Extended actor type with manifest hash methods (added to backend but not yet in generated types)
-interface ActorWithManifest {
+// Extended actor type with content storage methods
+interface ActorWithContent {
+  setContentItems(json: string): Promise<void>;
+  getContentItems(): Promise<string>;
   setManifestHash(hash: string): Promise<void>;
-  getManifestHash(): Promise<string | null>;
 }
 
 function generateId(): string {
@@ -56,7 +55,7 @@ function generateId(): string {
 }
 
 export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
-  const storageClient = useAdminStorageClient(); // null until canister ID + root key ready
+  const storageClient = useAdminStorageClient();
   const { actor } = useActor();
   const [selectedBatch, setSelectedBatch] = useState<string>(BATCHES[0]);
   const [selectedSection, setSelectedSection] = useState<string>(SECTIONS[0]);
@@ -71,7 +70,7 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
   const [uploadProgress, setUploadProgress] = useState(0);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadStatus, setUploadStatus] = useState<
-    "idle" | "uploading-file" | "uploading-manifest" | "done"
+    "idle" | "uploading-file" | "saving" | "done"
   >("idle");
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -116,6 +115,29 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
     [uploadTitle],
   );
 
+  // Persist content items to backend canister and localStorage
+  const persistContentItems = async (items: ContentItem[]): Promise<void> => {
+    // Always save locally first
+    saveLocalManifestItems(items);
+
+    // Then persist to backend canister so students on any device get it
+    if (actor) {
+      try {
+        const json = JSON.stringify(items);
+        await (actor as unknown as ActorWithContent).setContentItems(json);
+      } catch (err) {
+        console.warn("Could not persist content items to backend:", err);
+        // Non-fatal — content uploaded, just backend list not updated
+        // Students will see it next time they retry
+        toast.warning(
+          "Content uploaded but sync to backend failed. Students may not see it immediately.",
+        );
+      }
+    } else {
+      console.warn("Actor not ready — content saved locally only");
+    }
+  };
+
   const handleUpload = async () => {
     if (!uploadTitle.trim()) {
       toast.error("Please enter a title");
@@ -125,7 +147,6 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
       toast.error("Please select a file");
       return;
     }
-
     if (!storageClient) {
       toast.error(
         "Storage is still initializing. Please wait a moment and try again.",
@@ -143,9 +164,8 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
 
     let fileHash: string;
     try {
-      // 1. Upload the file to blob storage
       fileHash = await uploadFileToStorage(storageClient, uploadFile, (pct) => {
-        setUploadProgress(Math.round(pct * 80)); // 0-80%
+        setUploadProgress(Math.round(pct * 85));
       });
     } catch (err) {
       console.error("File upload error:", err);
@@ -158,8 +178,8 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
     }
 
     try {
-      setUploadStatus("uploading-manifest");
-      setUploadProgress(85);
+      setUploadStatus("saving");
+      setUploadProgress(90);
 
       const newItem: ContentItem = {
         id: generateId(),
@@ -173,28 +193,10 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
 
       const updatedItems = [...contentItems, newItem];
 
-      // 2. Upload the manifest
-      const newManifestHash = await uploadManifest(storageClient, updatedItems);
-
-      setUploadProgress(95);
-
-      // 3. Persist manifest hash to backend so students on any device can fetch it
-      if (actor) {
-        try {
-          await (actor as unknown as ActorWithManifest).setManifestHash(
-            newManifestHash,
-          );
-        } catch (err) {
-          console.warn("Could not persist manifest hash to backend:", err);
-          // Non-fatal — content is still uploaded, just backend pointer not updated
-        }
-      }
+      // Persist to backend canister + localStorage
+      await persistContentItems(updatedItems);
 
       setUploadProgress(100);
-
-      // 4. Save locally as a cache
-      saveLocalManifestItems(updatedItems);
-      saveLocalManifestHash(newManifestHash);
       setContentItems(updatedItems);
       setUploadStatus("done");
 
@@ -209,7 +211,7 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
 
       toast.success("Content uploaded — students can see it now!");
     } catch (err) {
-      console.error("Manifest upload error:", err);
+      console.error("Save error:", err);
       toast.error("Upload failed while saving content list. Please try again.");
       setIsUploading(false);
       setUploadProgress(0);
@@ -242,19 +244,10 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
     setIsDeleting(true);
     try {
       const updatedItems = contentItems.filter((i) => i.id !== id);
-      const newManifestHash = await uploadManifest(storageClient, updatedItems);
-      // Persist updated manifest hash to backend
-      if (actor) {
-        try {
-          await (actor as unknown as ActorWithManifest).setManifestHash(
-            newManifestHash,
-          );
-        } catch (err) {
-          console.warn("Could not persist manifest hash to backend:", err);
-        }
-      }
-      saveLocalManifestItems(updatedItems);
-      saveLocalManifestHash(newManifestHash);
+
+      // Persist to backend canister + localStorage
+      await persistContentItems(updatedItems);
+
       setContentItems(updatedItems);
       setDeleteId(null);
       toast.success("Content deleted");
@@ -276,10 +269,9 @@ export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
 
   const uploadStatusText = () => {
     if (uploadStatus === "uploading-file") {
-      return uploadProgress < 80 ? "Uploading file to CDN..." : "Processing...";
+      return uploadProgress < 85 ? "Uploading file to CDN..." : "Processing...";
     }
-    if (uploadStatus === "uploading-manifest")
-      return "Updating content list...";
+    if (uploadStatus === "saving") return "Saving content list...";
     if (uploadStatus === "done") return "Done!";
     return "";
   };
