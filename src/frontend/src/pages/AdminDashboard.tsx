@@ -15,7 +15,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useActor } from "@/hooks/useActor";
-import { useStorageClient } from "@/hooks/useStorageClient";
+import { useAdminStorageClient } from "@/hooks/useAdminStorageClient";
 import { BATCHES, type ContentItem, SECTIONS } from "@/types/missioncopy";
 import {
   getLocalManifestItems,
@@ -56,7 +56,7 @@ function generateId(): string {
 }
 
 export default function AdminDashboard({ onLogout }: AdminDashboardProps) {
-  const storageClient = useStorageClient(); // null until canister ID resolves
+  const storageClient = useAdminStorageClient(); // null until canister ID + root key ready
   const { actor } = useActor();
   const [selectedBatch, setSelectedBatch] = useState<string>(BATCHES[0]);
   const [selectedSection, setSelectedSection] = useState<string>(SECTIONS[0]);

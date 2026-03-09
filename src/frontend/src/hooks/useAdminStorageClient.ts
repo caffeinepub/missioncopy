@@ -1,16 +1,17 @@
 /**
- * Student-facing storage client hook.
+ * Admin-specific storage client hook.
  * Uses loadConfig() from config.ts – the same source of truth that the actor
  * agent uses – so the v3 certified response always comes back correctly.
+ * This fixes "Expected v3 response body" on upload and delete.
  */
 import { loadConfig } from "@/config";
-import { useInternetIdentity } from "@/hooks/useInternetIdentity";
 import { StorageClient } from "@/utils/StorageClient";
 import { HttpAgent } from "@icp-sdk/core/agent";
 import { useEffect, useState } from "react";
 
-export function useStorageClient(_bucket = "default"): StorageClient | null {
-  const { identity } = useInternetIdentity();
+export function useAdminStorageClient(
+  _bucket = "default",
+): StorageClient | null {
   const [client, setClient] = useState<StorageClient | null>(null);
 
   useEffect(() => {
@@ -21,19 +22,17 @@ export function useStorageClient(_bucket = "default"): StorageClient | null {
 
       const canisterId = config.backend_canister_id;
       if (!canisterId) {
-        console.error("useStorageClient: backend canister ID is not available");
+        console.error(
+          "useAdminStorageClient: backend canister ID not available",
+        );
         return;
       }
 
-      const agentOptions: { host?: string; identity?: typeof identity } = {
+      const agent = new HttpAgent({
         host: config.backend_host,
-      };
-      if (identity) {
-        agentOptions.identity = identity;
-      }
-      const agent = new HttpAgent(agentOptions);
+      });
 
-      // Only fetch root key on local replica.
+      // Only fetch root key on local replica (not mainnet).
       if (
         config.backend_host?.includes("localhost") ||
         config.backend_host?.includes("127.0.0.1")
@@ -59,13 +58,13 @@ export function useStorageClient(_bucket = "default"): StorageClient | null {
     }
 
     init().catch((err) => {
-      console.error("useStorageClient init error:", err);
+      console.error("useAdminStorageClient init error:", err);
     });
 
     return () => {
       cancelled = true;
     };
-  }, [_bucket, identity]);
+  }, [_bucket]);
 
   return client;
 }
