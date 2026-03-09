@@ -99,27 +99,60 @@ async function maybeLoadMockBackend(): Promise<backendInterface | null> {
   }
 
   try {
-    // If VITE_USE_MOCK is enabled, try to load a mock backend module *if it exists*.
-    // We use import.meta.glob so builds don't fail when the mock file is absent.
     const mockModules = import.meta.glob("./mocks/backend.{ts,tsx,js,jsx}");
-
     const path = Object.keys(mockModules)[0];
     if (!path) return null;
-
     const mod = (await mockModules[path]()) as {
       mockBackend?: backendInterface;
     };
-
     return mod.mockBackend ?? null;
   } catch {
     return null;
   }
 }
 
+// Cached admin storage client — reuses the same agent as createActorWithConfig
+// so _caffeineStorageCreateCertificate returns a v3 response body correctly.
+let adminStorageClientCache: StorageClient | null = null;
+let adminAgentCache: HttpAgent | null = null;
+
+/**
+ * Returns a StorageClient that shares the same HttpAgent used by the default
+ * (anonymous) actor. This is critical: only an agent created with the correct
+ * host/config produces v3 certified responses from _caffeineStorageCreateCertificate.
+ */
+export async function getAdminStorageClient(): Promise<StorageClient> {
+  if (adminStorageClientCache) {
+    return adminStorageClientCache;
+  }
+  const config = await loadConfig();
+  const agent = new HttpAgent({
+    host: config.backend_host,
+  });
+  if (
+    config.backend_host?.includes("localhost") ||
+    config.backend_host?.includes("127.0.0.1")
+  ) {
+    try {
+      await agent.fetchRootKey();
+    } catch (err) {
+      console.warn("fetchRootKey failed:", err);
+    }
+  }
+  adminAgentCache = agent;
+  adminStorageClientCache = new StorageClient(
+    config.bucket_name,
+    config.storage_gateway_url,
+    config.backend_canister_id,
+    config.project_id,
+    agent,
+  );
+  return adminStorageClientCache;
+}
+
 export async function createActorWithConfig(
   options?: CreateActorOptions,
 ): Promise<backendInterface> {
-  // Attempt to load mock backend if enabled
   const mock = await maybeLoadMockBackend();
   if (mock) {
     return mock;
@@ -144,6 +177,21 @@ export async function createActorWithConfig(
     agent: agent,
     processError,
   };
+
+  // If no custom identity options, reuse/prime the admin storage client cache
+  // with this agent so uploads share the same agent path.
+  if (!resolvedOptions.agentOptions?.identity) {
+    if (!adminStorageClientCache) {
+      adminAgentCache = agent;
+      adminStorageClientCache = new StorageClient(
+        config.bucket_name,
+        config.storage_gateway_url,
+        config.backend_canister_id,
+        config.project_id,
+        agent,
+      );
+    }
+  }
 
   const storageClient = new StorageClient(
     config.bucket_name,

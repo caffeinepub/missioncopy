@@ -1,60 +1,11 @@
-import type { ContentItem } from "@/types/missioncopy";
-import type { StorageClient } from "@/utils/StorageClient";
+import type { ContentItem } from "../types/missioncopy";
+import type { StorageClient } from "./StorageClient";
 
-// ─── localStorage keys ─────────────────────────────────────────────────────
-export const MANIFEST_ITEMS_KEY = "missioncopy_content_items";
+export const LOCAL_MANIFEST_KEY = "missioncopy_manifest_v2";
 
-// ─── File upload via StorageClient ────────────────────────────────────────
-// Streams file in segments to avoid loading entire file into memory at once.
-export async function uploadFile(
-  storageClient: StorageClient,
-  file: File,
-  onProgress?: (pct: number) => void,
-): Promise<string> {
-  const SEGMENT = 32 * 1024 * 1024; // 32 MB per read segment
-  const totalSize = file.size;
-
-  if (totalSize <= SEGMENT) {
-    // Small/medium file: read all at once
-    const buf = await file.arrayBuffer();
-    const { hash } = await storageClient.putFile(
-      new Uint8Array(buf),
-      onProgress,
-    );
-    return hash;
-  }
-
-  // Large file (>32 MB): use streaming via Blob.stream() + ReadableStream
-  // Read in segments and concatenate before uploading to avoid OOM
-  const allChunks: Uint8Array[] = [];
-  let readBytes = 0;
-  for (let offset = 0; offset < totalSize; offset += SEGMENT) {
-    const slice = file.slice(offset, Math.min(offset + SEGMENT, totalSize));
-    const buf = await slice.arrayBuffer();
-    allChunks.push(new Uint8Array(buf));
-    readBytes += buf.byteLength;
-    if (onProgress) onProgress((readBytes / totalSize) * 0.4); // 0–40% reading
-  }
-
-  // Merge all segments into one buffer for StorageClient.putFile
-  const merged = new Uint8Array(totalSize);
-  let pos = 0;
-  for (const chunk of allChunks) {
-    merged.set(chunk, pos);
-    pos += chunk.length;
-  }
-
-  const { hash } = await storageClient.putFile(merged, (pct) => {
-    if (onProgress) onProgress(0.4 + pct * 0.6); // 40–100% uploading
-  });
-
-  return hash;
-}
-
-// ─── localStorage helpers ─────────────────────────────────────────────────
 export function getLocalManifestItems(): ContentItem[] {
   try {
-    const raw = localStorage.getItem(MANIFEST_ITEMS_KEY);
+    const raw = localStorage.getItem(LOCAL_MANIFEST_KEY);
     if (!raw) return [];
     return JSON.parse(raw) as ContentItem[];
   } catch {
@@ -64,8 +15,24 @@ export function getLocalManifestItems(): ContentItem[] {
 
 export function saveLocalManifestItems(items: ContentItem[]): void {
   try {
-    localStorage.setItem(MANIFEST_ITEMS_KEY, JSON.stringify(items));
-  } catch {
-    // ignore quota errors silently
+    localStorage.setItem(LOCAL_MANIFEST_KEY, JSON.stringify(items));
+  } catch (err) {
+    console.warn("Could not save manifest to localStorage:", err);
   }
+}
+
+/**
+ * Upload a file using the provided StorageClient.
+ * onProgress receives a value 0..1.
+ */
+export async function uploadFile(
+  client: StorageClient,
+  file: File,
+  onProgress?: (progress: number) => void,
+): Promise<string> {
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  const { hash } = await client.putFile(bytes, (pct) => {
+    onProgress?.(pct / 100);
+  });
+  return hash;
 }
